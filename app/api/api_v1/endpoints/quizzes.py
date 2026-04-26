@@ -138,6 +138,7 @@ async def submit_quiz(
 @router.get("/results/all", response_model=List[QuizAttemptListResponse])
 async def get_all_results(
     quiz_id: Optional[UUID] = None,
+    batch_id: Optional[UUID] = None,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
@@ -145,7 +146,7 @@ async def get_all_results(
     Get quiz results (attempts). 
     Everyone can view, but parents are restricted to their kids.
     """
-    attempts = await QuizService.get_attempts(db, current_user["id"], current_user["role"], quiz_id)
+    attempts = await QuizService.get_attempts(db, current_user["id"], current_user["role"], quiz_id, batch_id)
     
     results_formatted = []
     for a in attempts:

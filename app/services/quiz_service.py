@@ -45,11 +45,26 @@ class QuizService:
                 .where(Student.parent_id == user_id)
             )
             query = base_query.where(Quiz.course_id.in_(parent_courses))
-        else:
-            return []
-            
         result = await db.execute(query)
-        return result.scalars().all()
+        quizzes = result.scalars().all()
+        
+        # If student, check which quizzes they've completed
+        if role == UserRole.student:
+            student_res = await db.execute(select(Student.id).where(Student.user_id == user_id))
+            student_id = student_res.scalars().first()
+            if student_id:
+                for q in quizzes:
+                    attempt_query = select(QuizAttempt.id).where(
+                        QuizAttempt.quiz_id == q.id,
+                        QuizAttempt.student_id == student_id
+                    )
+                    attempt_res = await db.execute(attempt_query)
+                    attempt_id = attempt_res.scalars().first()
+                    if attempt_id:
+                        q.is_completed = True
+                        q.attempt_id = attempt_id
+                        
+        return quizzes
 
     @staticmethod
     async def create_quiz(db: AsyncSession, quiz_in: QuizCreate, created_by: UUID) -> Quiz:
@@ -179,7 +194,7 @@ class QuizService:
         }
 
     @staticmethod
-    async def get_attempts(db: AsyncSession, user_id: UUID, role: str, quiz_id: UUID | None = None) -> list[QuizAttempt]:
+    async def get_attempts(db: AsyncSession, user_id: UUID, role: str, quiz_id: UUID | None = None, batch_id: UUID | None = None) -> list[QuizAttempt]:
         query = select(QuizAttempt).options(
             selectinload(QuizAttempt.quiz).selectinload(Quiz.questions), 
             selectinload(QuizAttempt.student)
@@ -189,15 +204,20 @@ class QuizService:
             query = query.where(QuizAttempt.quiz_id == quiz_id)
             
         if role == UserRole.admin:
-            pass # See all
+            if batch_id:
+                query = query.join(Student).join(Enrollment).where(Enrollment.batch_id == batch_id)
         elif role == UserRole.teacher:
             # Attempts for quizzes they created or courses they teach
-            query = query.join(Quiz).join(Course).join(Batch, isouter=True).where(
-                or_(
-                    Quiz.created_by == user_id,
-                    Batch.teacher_id == user_id
+            query = query.join(Quiz).join(Course).join(Batch, isouter=True)
+            if batch_id:
+                query = query.where(Batch.id == batch_id)
+            else:
+                query = query.where(
+                    or_(
+                        Quiz.created_by == user_id,
+                        Batch.teacher_id == user_id
+                    )
                 )
-            )
         elif role == UserRole.student:
             query = query.join(Student).where(Student.user_id == user_id)
         elif role == UserRole.parent:

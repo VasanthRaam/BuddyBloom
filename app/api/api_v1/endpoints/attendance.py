@@ -66,3 +66,50 @@ async def get_attendance(
         limit=limit
     )
     return records
+
+@router.get("/holidays", response_model=List[dict])
+async def get_holidays(
+    db: AsyncSession = Depends(get_db)
+):
+    """Fetch all academy holidays."""
+    from app.db.models import AcademyHoliday
+    result = await db.execute(select(AcademyHoliday).order_by(AcademyHoliday.date.desc()))
+    return result.scalars().all()
+
+@router.post("/holidays", status_code=201)
+async def mark_holiday(
+    holiday_date: date,
+    description: str = "",
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(RequireRole(["admin"]))
+):
+    """Mark a specific date as an academy holiday. Only Admins."""
+    from app.db.models import AcademyHoliday
+    
+    # Check if exists
+    res = await db.execute(select(AcademyHoliday).where(AcademyHoliday.date == holiday_date))
+    if res.scalars().first():
+        raise HTTPException(status_code=400, detail="This date is already marked as a holiday.")
+        
+    db_holiday = AcademyHoliday(
+        date=holiday_date,
+        description=description,
+        created_by=current_user["id"]
+    )
+    db.add(db_holiday)
+    await db.commit()
+    return {"message": "Academy holiday marked successfully", "date": holiday_date}
+
+@router.delete("/holidays/{holiday_date}")
+async def remove_holiday(
+    holiday_date: date,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(RequireRole(["admin"]))
+):
+    """Remove an academy holiday. Only Admins."""
+    from app.db.models import AcademyHoliday
+    from sqlalchemy import delete
+    
+    await db.execute(delete(AcademyHoliday).where(AcademyHoliday.date == holiday_date))
+    await db.commit()
+    return {"message": "Holiday removed"}

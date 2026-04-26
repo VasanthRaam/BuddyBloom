@@ -13,7 +13,7 @@ class OptionCreate(OptionBase):
 
 class OptionResponse(OptionBase):
     id: UUID
-    # We do not expose is_correct here to prevent cheating!
+    is_correct: bool
     
 class OptionTeacherResponse(OptionBase):
     id: UUID

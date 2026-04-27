@@ -21,7 +21,7 @@ class HomeworkService:
 
         # Notify students
         await NotificationService.notify_students_for_homework(
-            db, hw_in.batch_id, hw_in.title, hw_in.description, db_hw.id
+            db, hw_in.batch_id, db_hw.id, hw_in.title, hw_in.description
         )
 
         await db.commit()

@@ -53,3 +53,41 @@ async def read_user(
             detail="User not found"
         )
     return user
+
+from app.schemas.user import PushTokenCreate
+from app.api.deps import get_current_user
+from app.db.models import UserPushToken
+
+@router.post("/push-token", status_code=status.HTTP_200_OK)
+async def register_push_token(
+    token_in: PushTokenCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Register an Expo Push Token for the current user.
+    """
+    user_id = current_user["id"]
+    
+    # Check if token already exists for this user to avoid duplicates
+    result = await db.execute(
+        select(UserPushToken).where(
+            UserPushToken.user_id == user_id,
+            UserPushToken.push_token == token_in.push_token
+        )
+    )
+    existing = result.scalars().first()
+    
+    if existing:
+        return {"status": "already_registered"}
+    
+    # Create new push token entry
+    new_token = UserPushToken(
+        user_id=user_id,
+        push_token=token_in.push_token,
+        device_type=token_in.device_type
+    )
+    db.add(new_token)
+    await db.commit()
+    
+    return {"status": "registered"}

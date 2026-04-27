@@ -49,7 +49,13 @@ async def create_quiz(
              raise HTTPException(status_code=403, detail="You can only create quizzes for courses you teach.")
 
     try:
-        return await QuizService.create_quiz(db, quiz_in, current_user["id"])
+        quiz = await QuizService.create_quiz(db, quiz_in, current_user["id"])
+        
+        # Trigger real-time notifications for students
+        from app.services.notification_service import NotificationService
+        await NotificationService.notify_students_for_new_quiz(db, quiz.course_id, quiz.id, quiz.title)
+        
+        return quiz
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

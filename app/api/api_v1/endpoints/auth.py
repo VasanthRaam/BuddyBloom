@@ -120,6 +120,16 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
             is_read=False,
         )
         db.add(notif)
+        
+        # Trigger real-time push notification for Admins
+        from app.services.notification_service import NotificationService
+        await NotificationService.send_push_notification(
+            db, 
+            admin.id, 
+            "New Registration Request 👤", 
+            f"{request.full_name} ({request.role}) has requested to join. Tap to review.",
+            {"type": "registration", "id": str(pending.id)}
+        )
 
     await db.commit()
 
@@ -357,6 +367,16 @@ async def approve_registration(pending_id: str, db: AsyncSession = Depends(get_d
         is_read=False,
     )
     db.add(welcome_notif)
+    
+    # Trigger real-time push notification for the newly approved user
+    from app.services.notification_service import NotificationService
+    await NotificationService.send_push_notification(
+        db, 
+        new_user.id, 
+        "Account Approved! 🎉", 
+        f"Hi {pending.full_name}, welcome to BuddyBloom! You can now log in.",
+        {"type": "approval"}
+    )
 
     # ── Mark pending as approved (audit trail) ────────────────────────────────
     pending.status = "approved"

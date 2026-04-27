@@ -296,3 +296,14 @@ class AcademyHoliday(Base):
     description = Column(String, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class UserPushToken(Base):
+    __tablename__ = "user_push_tokens"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    push_token = Column(String, unique=True, nullable=False)
+    device_type = Column(String, nullable=True) # e.g. "android", "ios"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    user = relationship("User", backref="push_tokens")

@@ -25,7 +25,8 @@ class NotificationService:
                 "title": title,
                 "body": message,
                 "sound": "default",
-                "priority": "high"
+                "priority": "high",
+                "channelId": "default"
             }
             if data:
                 msg["data"] = data

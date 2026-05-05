@@ -18,7 +18,6 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/auth/register",
             "/api/v1/auth/courses-batches",
             "/api/v1/auth/test-token",
-            "/api/v1/users/",
         ]
 
     async def dispatch(self, request: Request, call_next):

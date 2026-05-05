@@ -6,7 +6,7 @@ from uuid import UUID
 from datetime import date
 
 from app.db.database import get_db
-from app.schemas.attendance import AttendanceBulkCreate, AttendanceResponse
+from app.schemas.attendance import AttendanceBulkCreate, AttendanceResponse, HolidayResponse
 from app.services.attendance_service import AttendanceService
 from app.api.deps import get_current_user, RequireRole
 
@@ -67,7 +67,7 @@ async def get_attendance(
     )
     return records
 
-@router.get("/holidays", response_model=List[dict])
+@router.get("/holidays", response_model=List[HolidayResponse])
 async def get_holidays(
     db: AsyncSession = Depends(get_db)
 ):

@@ -17,6 +17,18 @@ class UserService:
         db.add(db_user)
         await db.commit()
         await db.refresh(db_user)
+        
+        # Notify Admins about the new registration
+        try:
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_admins_new_registration(
+                db, 
+                db_user.full_name, 
+                db_user.role.value if hasattr(db_user.role, 'value') else str(db_user.role)
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to notify admins about new registration: {e}")
+            
         return db_user
 
     @staticmethod

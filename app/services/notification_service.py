@@ -114,4 +114,39 @@ class NotificationService:
         
         await db.commit()
         return len(user_ids)
-
+    @staticmethod
+    async def notify_admins_new_registration(db: AsyncSession, new_user_name: str, new_user_role: str):
+        """
+        Notify all administrators when a new user registers.
+        """
+        from app.db.models import User, UserRole
+        
+        # Find all admins
+        query = select(User.id).where(User.role == UserRole.ADMIN)
+        result = await db.execute(query)
+        admin_ids = result.scalars().all()
+        
+        title = "New Registration! 🔔"
+        message = f"{new_user_name} has registered as a {new_user_role} and is awaiting your approval."
+        
+        for aid in admin_ids:
+            # 1. Save In-App Notification
+            db_notification = Notification(
+                user_id=aid,
+                title=title,
+                message=message,
+                link_to="PendingApprovals"
+            )
+            db.add(db_notification)
+            
+            # 2. Trigger Real-Time Push Notification
+            await NotificationService.send_push_notification(
+                db, 
+                aid, 
+                title, 
+                message, 
+                {"type": "registration_request", "action": "approval"}
+            )
+        
+        await db.commit()
+        return len(admin_ids)

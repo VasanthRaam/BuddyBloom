@@ -41,6 +41,11 @@ class ApproveRequest(BaseModel):
 class RejectRequest(BaseModel):
     reason: str | None = "No reason provided."
 
+class GoogleSyncRequest(BaseModel):
+    access_token: str
+    email: EmailStr
+    full_name: str
+
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 def _role_value(role) -> str:
@@ -201,6 +206,47 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
         "access_token": response.session.access_token,
         "token_type": "bearer",
         "user": user_data,
+    }
+
+@router.post("/google-sync")
+async def google_sync(request: GoogleSyncRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Sync a Google-authenticated user with our local database.
+    If the user doesn't exist, return 404 so the app can redirect to Register.
+    """
+    # 1. Fetch local profile by email
+    result = await db.execute(select(User).where(User.email == request.email))
+    db_user = result.scalars().first()
+
+    if not db_user:
+        # Check if they have a pending registration
+        pend_res = await db.execute(
+            select(PendingRegistration).where(PendingRegistration.email == request.email)
+        )
+        pending = pend_res.scalars().first()
+        if pending:
+            if pending.status == "pending":
+                raise HTTPException(status_code=403, detail="Your Google registration is pending admin approval.")
+            if pending.status == "rejected":
+                raise HTTPException(status_code=403, detail=f"Your registration was rejected. Reason: {pending.rejection_reason}")
+        
+        # Truly not found -> Trigger registration flow on mobile
+        raise HTTPException(status_code=404, detail="Profile not found. Please complete registration.")
+
+    # 2. Check approval status
+    if not db_user.is_approved:
+        raise HTTPException(
+            status_code=403,
+            detail="Your account is pending admin approval."
+        )
+
+    return {
+        "user": {
+            "id": str(db_user.id),
+            "email": db_user.email,
+            "role": _role_value(db_user.role),
+            "full_name": db_user.full_name,
+        }
     }
 
 

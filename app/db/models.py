@@ -55,6 +55,7 @@ class PendingRegistration(Base):
     # New fields for course/batch selection
     selected_course_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
     selected_batch_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
+    push_token = Column(String, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

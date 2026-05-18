@@ -72,8 +72,7 @@ class QuizService:
         db.add(db_quiz)
         await db.commit()
         
-        # Trigger Notification
-        await NotificationService.notify_students_for_new_quiz(db, db_quiz.course_id, db_quiz.id, db_quiz.title)
+        # Notification is now triggered via BackgroundTasks in the router
         
         # Re-fetch with relationships to avoid MissingGreenlet error in response serialization
         query = select(Quiz).options(selectinload(Quiz.questions).selectinload(Question.options)).where(Quiz.id == db_quiz.id)

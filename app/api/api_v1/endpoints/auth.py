@@ -71,8 +71,10 @@ async def get_courses_batches(db: AsyncSession = Depends(get_db)):
         })
     return output
 
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
+
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(request: RegisterRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     """
     Step 1 of sign-up: store details in pending_registrations and alert admins.
     Supabase Auth account is NOT created yet — that happens on admin approval.
@@ -111,32 +113,34 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
     db.add(pending)
     await db.flush()
 
-    # Notify all admins
-    admin_res = await db.execute(select(User).where(User.role == UserRole.admin))
-    admins = admin_res.scalars().all()
-
-    for admin in admins:
-        notif = Notification(
-            id=uuid.uuid4(),
-            user_id=admin.id,
-            title="New Registration Request",
-            message=f"{request.full_name} ({request.role}) has requested to join BuddyBloom. Tap to review.",
-            link_to=f"PendingApproval:{pending.id}",
-            is_read=False,
-        )
-        db.add(notif)
-        
-        # Trigger real-time push notification for Admins
+    # Trigger notifications in background
+    async def notify_admins(pending_id_str, full_name, role_str):
+        from app.db.database import AsyncSessionLocal
         from app.services.notification_service import NotificationService
-        await NotificationService.send_push_notification(
-            db, 
-            admin.id, 
-            "New Registration Request 👤", 
-            f"{request.full_name} ({request.role}) has requested to join. Tap to review.",
-            {"type": "registration", "id": str(pending.id)}
-        )
+        from app.db.models import User, UserRole, Notification
+        import uuid
+        async with AsyncSessionLocal() as session:
+            admin_res = await session.execute(select(User).where(User.role == UserRole.admin))
+            admins = admin_res.scalars().all()
+            for admin in admins:
+                notif = Notification(
+                    id=uuid.uuid4(),
+                    user_id=admin.id,
+                    title="New Registration Request",
+                    message=f"{full_name} ({role_str}) has requested to join BuddyBloom. Tap to review.",
+                    link_to=f"PendingApproval:{pending_id_str}",
+                    is_read=False,
+                )
+                session.add(notif)
+                await NotificationService.send_push_notification(
+                    session, admin.id, "New Registration Request 👤",
+                    f"{full_name} ({role_str}) has requested to join. Tap to review.",
+                    {"type": "registration", "id": pending_id_str}
+                )
+            await session.commit()
 
     await db.commit()
+    background_tasks.add_task(notify_admins, str(pending.id), request.full_name, request.role)
 
     return {
         "message": "Registration submitted. An admin will review your request. You will be able to login once approved.",
@@ -350,11 +354,26 @@ async def approve_registration(pending_id: str, db: AsyncSession = Depends(get_d
                     raise Exception("Sign up returned no user. Check if 'Confirm email' is ON.")
         except Exception as e:
             err = str(e)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create Supabase Auth account: {err}. "
-                       "Tip: Set SUPABASE_SERVICE_KEY in .env, or disable 'Confirm email' in Supabase Auth settings."
-            )
+            if "already exists" in err.lower() or "already registered" in err.lower():
+                # User exists (likely via Google Auth). Find their ID.
+                try:
+                    # In newer supabase-py versions, list_users() returns a UserList object where .users is the array
+                    all_users_resp = admin_client.auth.admin.list_users()
+                    users_list = getattr(all_users_resp, 'users', all_users_resp)
+                    for u in users_list:
+                        if getattr(u, 'email', None) == pending.email or (isinstance(u, dict) and u.get('email') == pending.email):
+                            supabase_user_id = getattr(u, 'id', None) or (isinstance(u, dict) and u.get('id'))
+                            break
+                    if not supabase_user_id:
+                        raise Exception("User exists but could not be found in list.")
+                except Exception as find_err:
+                     raise HTTPException(status_code=500, detail=f"User exists but failed to retrieve ID: {find_err}")
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to create Supabase Auth account: {err}. "
+                           "Tip: Set SUPABASE_SERVICE_KEY in .env, or disable 'Confirm email' in Supabase Auth settings."
+                )
 
     # ── Create local User profile ─────────────────────────────────────────────
     new_user = User(

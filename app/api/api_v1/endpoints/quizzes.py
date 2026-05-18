@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from uuid import UUID
@@ -34,6 +34,7 @@ async def list_quizzes(
 @router.post("/", response_model=QuizResponse, status_code=status.HTTP_201_CREATED)
 async def create_quiz(
     quiz_in: QuizCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(RequireRole(["teacher", "admin"]))
 ):
@@ -50,6 +51,16 @@ async def create_quiz(
 
     try:
         quiz = await QuizService.create_quiz(db, quiz_in, current_user["id"])
+        
+        async def notify_students(course_id_str, quiz_id_str, quiz_title):
+            from app.db.database import AsyncSessionLocal
+            from app.services.notification_service import NotificationService
+            from uuid import UUID
+            async with AsyncSessionLocal() as session:
+                await NotificationService.notify_students_for_new_quiz(session, UUID(course_id_str), UUID(quiz_id_str), quiz_title)
+
+        background_tasks.add_task(notify_students, str(quiz.course_id), str(quiz.id), quiz.title)
+        
         return quiz
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -19,10 +19,7 @@ class HomeworkService:
         db.add(db_hw)
         await db.flush()
 
-        # Notify students
-        await NotificationService.notify_students_for_homework(
-            db, hw_in.batch_id, hw_in.title, hw_in.description, db_hw.id
-        )
+        # Notification is now triggered via BackgroundTasks in the router
 
         await db.commit()
         return await HomeworkService.get_homework(db, db_hw.id)

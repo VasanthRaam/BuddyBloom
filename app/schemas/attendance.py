@@ -22,3 +22,11 @@ class AttendanceResponse(AttendanceBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+class HolidayResponse(BaseModel):
+    id: UUID
+    date: date
+    description: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

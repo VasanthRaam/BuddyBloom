@@ -56,6 +56,7 @@ class PendingRegistration(Base):
     # New fields for course/batch selection
     selected_course_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
     selected_batch_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
+    push_token = Column(String, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -299,4 +300,24 @@ class Expense(Base):
     expense_date = Column(Date, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+class AcademyHoliday(Base):
+    __tablename__ = "academy_holidays"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    date = Column(Date, unique=True, nullable=False)
+    description = Column(String, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class UserPushToken(Base):
+    __tablename__ = "user_push_tokens"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    push_token = Column(String, unique=True, nullable=False)
+    device_type = Column(String, nullable=True) # e.g. "android", "ios"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    user = relationship("User", backref="push_tokens")
 

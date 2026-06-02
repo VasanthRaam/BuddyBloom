@@ -23,3 +23,7 @@ class UserResponse(UserBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+class PushTokenCreate(BaseModel):
+    push_token: str
+    device_type: Optional[str] = None

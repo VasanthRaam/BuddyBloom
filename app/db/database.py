@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import declarative_base
 from app.core.config import settings
 
+print(f"DEBUG: Connecting to database at {settings.DATABASE_URL.split('@')[-1]}")
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=True,

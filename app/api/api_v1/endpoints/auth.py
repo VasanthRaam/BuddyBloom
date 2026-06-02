@@ -30,6 +30,7 @@ class RegisterRequest(BaseModel):
     role: str  # "teacher" | "student" | "parent"
     course_ids: list[uuid.UUID] | None = []
     batch_ids: list[uuid.UUID] | None = []
+    push_token: str | None = None
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -40,6 +41,11 @@ class ApproveRequest(BaseModel):
 
 class RejectRequest(BaseModel):
     reason: str | None = "No reason provided."
+
+class GoogleSyncRequest(BaseModel):
+    access_token: str
+    email: EmailStr
+    full_name: str
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -66,8 +72,10 @@ async def get_courses_batches(db: AsyncSession = Depends(get_db)):
         })
     return output
 
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
+
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(request: RegisterRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     """
     Step 1 of sign-up: store details in pending_registrations and alert admins.
     Supabase Auth account is NOT created yet — that happens on admin approval.
@@ -102,26 +110,39 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
         status="pending",
         selected_course_ids=request.course_ids,
         selected_batch_ids=request.batch_ids,
+        push_token=request.push_token,
     )
     db.add(pending)
     await db.flush()
 
-    # Notify all admins
-    admin_res = await db.execute(select(User).where(User.role == UserRole.admin))
-    admins = admin_res.scalars().all()
-
-    for admin in admins:
-        notif = Notification(
-            id=uuid.uuid4(),
-            user_id=admin.id,
-            title="New Registration Request",
-            message=f"{request.full_name} ({request.role}) has requested to join BuddyBloom. Tap to review.",
-            link_to=f"PendingApproval:{pending.id}",
-            is_read=False,
-        )
-        db.add(notif)
+    # Trigger notifications in background
+    async def notify_admins(pending_id_str, full_name, role_str):
+        from app.db.database import AsyncSessionLocal
+        from app.services.notification_service import NotificationService
+        from app.db.models import User, UserRole, Notification
+        import uuid
+        async with AsyncSessionLocal() as session:
+            admin_res = await session.execute(select(User).where(User.role == UserRole.admin))
+            admins = admin_res.scalars().all()
+            for admin in admins:
+                notif = Notification(
+                    id=uuid.uuid4(),
+                    user_id=admin.id,
+                    title="New Registration Request",
+                    message=f"{full_name} ({role_str}) has requested to join BuddyBloom. Tap to review.",
+                    link_to=f"PendingApproval:{pending_id_str}",
+                    is_read=False,
+                )
+                session.add(notif)
+                await NotificationService.send_push_notification(
+                    session, admin.id, "New Registration Request 👤",
+                    f"{full_name} ({role_str}) has requested to join. Tap to review.",
+                    {"type": "registration", "id": pending_id_str}
+                )
+            await session.commit()
 
     await db.commit()
+    background_tasks.add_task(notify_admins, str(pending.id), request.full_name, request.role)
 
     return {
         "message": "Registration submitted. An admin will review your request. You will be able to login once approved.",
@@ -193,6 +214,47 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
         "user": user_data,
     }
 
+@router.post("/google-sync")
+async def google_sync(request: GoogleSyncRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Sync a Google-authenticated user with our local database.
+    If the user doesn't exist, return 404 so the app can redirect to Register.
+    """
+    # 1. Fetch local profile by email
+    result = await db.execute(select(User).where(User.email == request.email))
+    db_user = result.scalars().first()
+
+    if not db_user:
+        # Check if they have a pending registration
+        pend_res = await db.execute(
+            select(PendingRegistration).where(PendingRegistration.email == request.email)
+        )
+        pending = pend_res.scalars().first()
+        if pending:
+            if pending.status == "pending":
+                raise HTTPException(status_code=403, detail="Your Google registration is pending admin approval.")
+            if pending.status == "rejected":
+                raise HTTPException(status_code=403, detail=f"Your registration was rejected. Reason: {pending.rejection_reason}")
+        
+        # Truly not found -> Trigger registration flow on mobile
+        raise HTTPException(status_code=404, detail="Profile not found. Please complete registration.")
+
+    # 2. Check approval status
+    if not db_user.is_approved:
+        raise HTTPException(
+            status_code=403,
+            detail="Your account is pending admin approval."
+        )
+
+    return {
+        "user": {
+            "id": str(db_user.id),
+            "email": db_user.email,
+            "role": _role_value(db_user.role),
+            "full_name": db_user.full_name,
+        }
+    }
+
 
 @router.get("/pending")
 async def list_pending(db: AsyncSession = Depends(get_db)):
@@ -221,17 +283,16 @@ async def list_pending(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/approve/{pending_id}")
-async def approve_registration(pending_id: str, db: AsyncSession = Depends(get_db)):
+async def approve_registration(
+    pending_id: str, 
+    background_tasks: BackgroundTasks, 
+    db: AsyncSession = Depends(get_db)
+):
     """
     Admin approves a registration:
-    1. Creates the Supabase Auth user.
-    2. Creates the local User profile marked is_approved=True.
-    3. Marks pending record as approved and clears password.
-    4. Sends a welcome notification to the new user.
-    
-    Uses service_role key (admin.create_user) if SUPABASE_SERVICE_KEY is set in .env
-    so email confirmation is bypassed. Falls back to sign_up (anon key) otherwise —
-    in that case, disable 'Confirm email' in Supabase Dashboard > Auth > Settings.
+    1. Instantly marks status as approved in DB so card disappears from UI.
+    2. Spawns BackgroundTask to create Supabase Auth account and local profile.
+    3. Triggers welcome push notification to new student/teacher.
     """
     pend_res = await db.execute(
         select(PendingRegistration).where(PendingRegistration.id == pending_id)
@@ -251,122 +312,165 @@ async def approve_registration(pending_id: str, db: AsyncSession = Depends(get_d
         await db.commit()
         raise HTTPException(status_code=409, detail="A user with this email is already registered.")
 
-    saved_password = pending.hashed_temp_password
-
-    # ── Create Supabase Auth account ──────────────────────────────────────────
-    supabase_user_id = None
-    
-    # Strategy 1: Try to sign in first. If they already exist in Supabase Auth,
-    # we just need their ID. This avoids "Rate Limit" and "Already exists" errors.
-    try:
-        sign_in_check = supabase.auth.sign_in_with_password({
-            "email": pending.email,
-            "password": saved_password,
-        })
-        supabase_user_id = sign_in_check.user.id
-        # Sign out immediately so we don't leave a session on the server-side client
-        supabase.auth.sign_out()
-    except Exception:
-        # If sign-in fails, they likely don't exist yet or email isn't confirmed
-        pass
-
-    if not supabase_user_id:
-        try:
-            if settings.SUPABASE_SERVICE_KEY:
-                # Preferred: use admin API (bypasses email confirmation & rate limits)
-                from supabase import create_client as _cc
-                admin_client = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
-                auth_response = admin_client.auth.admin.create_user({
-                    "email": pending.email,
-                    "password": saved_password,
-                    "email_confirm": True,
-                })
-                supabase_user_id = auth_response.user.id
-            else:
-                # Fallback: anon sign_up
-                auth_response = supabase.auth.sign_up({
-                    "email": pending.email,
-                    "password": saved_password,
-                })
-                if auth_response.user:
-                    supabase_user_id = auth_response.user.id
-                else:
-                    raise Exception("Sign up returned no user. Check if 'Confirm email' is ON.")
-        except Exception as e:
-            err = str(e)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create Supabase Auth account: {err}. "
-                       "Tip: Set SUPABASE_SERVICE_KEY in .env, or disable 'Confirm email' in Supabase Auth settings."
-            )
-
-    # ── Create local User profile ─────────────────────────────────────────────
-    new_user = User(
-        id=supabase_user_id,
-        full_name=pending.full_name,
-        email=pending.email,
-        phone=pending.phone,
-        role=pending.role,
-        is_approved=True,
-    )
-    db.add(new_user)
-    await db.flush()
-
-    # ── Create Enrollments (Student) or Assignments (Teacher) ─────────────────
-    from app.db.models import Enrollment, Student, Batch
-    
-    if pending.role == UserRole.student:
-        # For students, we need a Student profile first
-        # Note: In this simple flow, we might not have a parent_id yet. 
-        # Using a placeholder or requiring one if needed.
-        # For now, let's create a profile.
-        student_profile = Student(
-            id=uuid.uuid4(),
-            user_id=new_user.id,
-            parent_id=new_user.id, # Placeholder: student is their own parent for now if not provided
-            first_name=pending.full_name.split()[0],
-            last_name=" ".join(pending.full_name.split()[1:]) if len(pending.full_name.split()) > 1 else "",
-        )
-        db.add(student_profile)
-        await db.flush()
-        
-        if pending.selected_batch_ids:
-            for b_id in pending.selected_batch_ids:
-                enrollment = Enrollment(
-                    id=uuid.uuid4(),
-                    student_id=student_profile.id,
-                    batch_id=b_id
-                )
-                db.add(enrollment)
-                
-    elif pending.role == UserRole.teacher:
-        if pending.selected_batch_ids:
-            for b_id in pending.selected_batch_ids:
-                # Assign teacher to batch
-                res = await db.execute(select(Batch).where(Batch.id == b_id))
-                batch = res.scalars().first()
-                if batch:
-                    batch.teacher_id = new_user.id
-
-    # ── Welcome notification ──────────────────────────────────────────────────
-    welcome_notif = Notification(
-        id=uuid.uuid4(),
-        user_id=new_user.id,
-        title="Account Approved! 🎉",
-        message=f"Hi {pending.full_name}, welcome to BuddyBloom! You can now log in with your email and password.",
-        is_read=False,
-    )
-    db.add(welcome_notif)
-
-    # ── Mark pending as approved (audit trail) ────────────────────────────────
+    # Synchronously mark as approved and commit, so UI is unblocked immediately
     pending.status = "approved"
-    pending.hashed_temp_password = "REDACTED"
-
     await db.commit()
 
+    async def process_approval_task(p_id_str):
+        from app.db.database import AsyncSessionLocal
+        from app.db.models import PendingRegistration, User, UserRole, Notification
+        from app.core.config import settings
+        from supabase import create_client as _cc
+        import uuid
+        
+        async with AsyncSessionLocal() as session:
+            # 1. Fetch pending record again inside background session
+            p_res = await session.execute(
+                select(PendingRegistration).where(PendingRegistration.id == UUID(p_id_str))
+            )
+            p = p_res.scalars().first()
+            if not p:
+                return
+                
+            saved_password = p.hashed_temp_password
+            
+            # 2. Supabase Auth account creation
+            supabase_user_id = None
+            try:
+                sign_in_check = supabase.auth.sign_in_with_password({
+                    "email": p.email,
+                    "password": saved_password,
+                })
+                supabase_user_id = sign_in_check.user.id
+                supabase.auth.sign_out()
+            except Exception:
+                pass
+                
+            if not supabase_user_id:
+                try:
+                    if settings.SUPABASE_SERVICE_KEY:
+                        admin_client = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+                        auth_response = admin_client.auth.admin.create_user({
+                            "email": p.email,
+                            "password": saved_password,
+                            "email_confirm": True,
+                        })
+                        supabase_user_id = auth_response.user.id
+                    else:
+                        auth_response = supabase.auth.sign_up({
+                            "email": p.email,
+                            "password": saved_password,
+                        })
+                        if auth_response.user:
+                            supabase_user_id = auth_response.user.id
+                except Exception as e:
+                    err = str(e)
+                    if "already exists" in err.lower() or "already registered" in err.lower():
+                        try:
+                            admin_client_to_use = admin_client if 'admin_client' in locals() else supabase
+                            all_users_resp = admin_client_to_use.auth.admin.list_users()
+                            users_list = getattr(all_users_resp, 'users', all_users_resp)
+                            for u in users_list:
+                                if getattr(u, 'email', None) == p.email or (isinstance(u, dict) and u.get('email') == p.email):
+                                    supabase_user_id = getattr(u, 'id', None) or (isinstance(u, dict) and u.get('id'))
+                                    break
+                        except Exception:
+                            pass
+
+            if not supabase_user_id:
+                # If we still failed to get or create a Supabase ID, restore status to pending so admin can retry
+                p.status = "pending"
+                await session.commit()
+                return
+
+            # 3. Create local User profile
+            new_user = User(
+                id=supabase_user_id,
+                full_name=p.full_name,
+                email=p.email,
+                phone=p.phone,
+                role=p.role,
+                is_approved=True,
+            )
+            session.add(new_user)
+            await session.flush()
+
+            # 4. Enrollments / Assignments
+            from app.db.models import Enrollment, Student, Batch
+            if p.role == UserRole.student:
+                student_profile = Student(
+                    id=uuid.uuid4(),
+                    user_id=new_user.id,
+                    parent_id=new_user.id,
+                    first_name=p.full_name.split()[0],
+                    last_name=" ".join(p.full_name.split()[1:]) if len(p.full_name.split()) > 1 else "",
+                )
+                session.add(student_profile)
+                await session.flush()
+                
+                if p.selected_batch_ids:
+                    for b_id in p.selected_batch_ids:
+                        enrollment = Enrollment(
+                            id=uuid.uuid4(),
+                            student_id=student_profile.id,
+                            batch_id=b_id
+                        )
+                        session.add(enrollment)
+                        
+            elif p.role == UserRole.teacher:
+                if p.selected_batch_ids:
+                    for b_id in p.selected_batch_ids:
+                        res = await session.execute(select(Batch).where(Batch.id == b_id))
+                        batch = res.scalars().first()
+                        if batch:
+                            batch.teacher_id = new_user.id
+
+            # 5. Welcome notification
+            welcome_notif = Notification(
+                id=uuid.uuid4(),
+                user_id=new_user.id,
+                title="Account Approved! 🎉",
+                message=f"Hi {p.full_name}, welcome to BuddyBloom! You can now log in.",
+                is_read=False,
+            )
+            session.add(welcome_notif)
+            
+            # Save push token for future use
+            if p.push_token:
+                from app.db.models import UserPushToken
+                existing_token_res = await session.execute(
+                    select(UserPushToken).where(UserPushToken.push_token == p.push_token)
+                )
+                existing_token = existing_token_res.scalars().first()
+                if existing_token:
+                    existing_token.user_id = new_user.id
+                else:
+                    new_push = UserPushToken(
+                        id=uuid.uuid4(),
+                        user_id=new_user.id,
+                        push_token=p.push_token,
+                        device_type="unknown"
+                    )
+                    session.add(new_push)
+                await session.flush()
+
+            # 6. Trigger real-time push notification for the newly approved user
+            from app.services.notification_service import NotificationService
+            await NotificationService.send_push_notification(
+                session, 
+                new_user.id, 
+                "Account Approved! 🎉", 
+                f"Hi {p.full_name}, welcome to BuddyBloom! You can now log in.",
+                {"type": "approval"}
+            )
+            
+            p.hashed_temp_password = "REDACTED"
+            await session.commit()
+
+    background_tasks.add_task(process_approval_task, str(pending.id))
     return {
-        "message": f"User {pending.email} approved successfully. They can now log in.",
-        "supabase_id": str(supabase_user_id),
+        "message": "User approved. Registration is being completed in the background.",
+        "pending_id": str(pending.id)
     }
 
 

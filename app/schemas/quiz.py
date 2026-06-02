@@ -13,7 +13,7 @@ class OptionCreate(OptionBase):
 
 class OptionResponse(OptionBase):
     id: UUID
-    # We do not expose is_correct here to prevent cheating!
+    is_correct: bool
     
 class OptionTeacherResponse(OptionBase):
     id: UUID
@@ -50,6 +50,8 @@ class QuizResponse(QuizBase):
     course_id: UUID
     created_at: datetime
     questions: Optional[List[QuestionResponse]] = None
+    is_completed: bool = False
+    attempt_id: Optional[UUID] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -58,6 +60,8 @@ class QuizTeacherResponse(QuizBase):
     course_id: UUID
     created_at: datetime
     questions: Optional[List[QuestionTeacherResponse]] = None
+    is_completed: bool = False
+    attempt_id: Optional[UUID] = None
 
     model_config = ConfigDict(from_attributes=True)
 

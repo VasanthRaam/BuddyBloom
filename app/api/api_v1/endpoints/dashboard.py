@@ -37,7 +37,9 @@ async def get_dashboard_stats(
         )
         
     elif role == "teacher":
-        # Avg performance (quiz attempts)
+        from app.db.models import Quiz
+        
+        # Avg performance (quiz attempts for quizzes created by this teacher)
         perf_res = await db.execute(
             select(
                 func.avg(
@@ -46,12 +48,12 @@ async def get_dashboard_stats(
                         else_=0
                     )
                 )
-            )
+            ).join(Quiz, Quiz.id == QuizAttempt.quiz_id).where(Quiz.created_by == user_id)
         )
         avg_perf = perf_res.scalar() or 0.0
         
-        batches = await db.execute(select(func.count(Batch.id)))
-        hw_pend = await db.execute(select(func.count(Homework.id))) # Simplified for now
+        batches = await db.execute(select(func.count(Batch.id)).where(Batch.teacher_id == user_id))
+        hw_pend = await db.execute(select(func.count(Homework.id)).where(Homework.teacher_id == user_id))
         
         response.teacher = TeacherStats(
             avg_performance=round(avg_perf * 100, 1),
@@ -60,18 +62,39 @@ async def get_dashboard_stats(
         )
         
     elif role == "student":
+        from app.db.models import Attendance, AttendanceStatus
         # Individual stats
-        # Need to find student record
         st_res = await db.execute(select(Student).where(Student.user_id == user_id))
         student = st_res.scalars().first()
         
         if student:
-            perf_res = await db.execute(select(func.avg(QuizAttempt.total_score), func.count(QuizAttempt.id)).where(QuizAttempt.student_id == student.id))
+            # Quiz Stats
+            perf_res = await db.execute(
+                select(
+                    func.avg(
+                        case(
+                            (QuizAttempt.max_score > 0, cast(QuizAttempt.total_score, Float) / QuizAttempt.max_score),
+                            else_=0
+                        )
+                    ),
+                    func.count(QuizAttempt.id)
+                ).where(QuizAttempt.student_id == student.id)
+            )
             avg_score, count = perf_res.first() or (0, 0)
             
+            # Attendance Stats
+            total_att = await db.execute(select(func.count(Attendance.id)).where(Attendance.student_id == student.id))
+            present_att = await db.execute(
+                select(func.count(Attendance.id))
+                .where(Attendance.student_id == student.id, Attendance.status == AttendanceStatus.present)
+            )
+            total_count = total_att.scalar() or 0
+            present_count = present_att.scalar() or 0
+            attendance_rate = (present_count / total_count * 100) if total_count > 0 else 0.0
+            
             response.student = StudentStats(
-                attendance_rate=95.0, # Placeholder
-                avg_quiz_score=float(avg_score or 0),
+                attendance_rate=round(attendance_rate, 1),
+                avg_quiz_score=round(float(avg_score or 0) * 100, 1),
                 completed_quizzes=count or 0
             )
 

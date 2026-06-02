@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from app.api.api_v1.endpoints import (
     auth, users, students, batches, courses, 
     attendance, quizzes, notifications, 
-    parent_dashboard, dashboard, homework
+    parent_dashboard, dashboard, homework, fees, revenue
 )
 
 api_router = APIRouter()
@@ -19,3 +19,5 @@ api_router.include_router(notifications.router, prefix="/notifications", tags=["
 api_router.include_router(parent_dashboard.router, prefix="/parents", tags=["parent-dashboard"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(homework.router, prefix="/homework", tags=["homework"])
+api_router.include_router(fees.router, prefix="/fees", tags=["fees"])
+api_router.include_router(revenue.router, prefix="/revenue", tags=["revenue"])

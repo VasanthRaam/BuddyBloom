@@ -23,6 +23,7 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     is_approved = Column(Boolean, default=False, server_default="false", nullable=False)
+    upi_id = Column(String, nullable=True)
 
     # Relationships
     students_as_parent = relationship("Student", back_populates="parent", foreign_keys="[Student.parent_id]")
@@ -287,3 +288,15 @@ class Enrollment(Base):
     # Relationships
     student = relationship("Student", back_populates="enrollments")
     batch = relationship("Batch", back_populates="enrollments")
+
+class Expense(Base):
+    __tablename__ = "expenses"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amount = Column(Float, nullable=False)
+    category = Column(String, nullable=False) # e.g. Salary, Maintenance, Other
+    description = Column(String)
+    expense_date = Column(Date, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+

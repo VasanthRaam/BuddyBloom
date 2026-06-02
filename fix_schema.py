@@ -80,6 +80,22 @@ async def fix_schema():
             );
         '''))
         
+        print("Adding upi_id to users...")
+        await conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS upi_id VARCHAR;'))
+
+        print("Creating expenses table...")
+        await conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS expenses (
+                id UUID PRIMARY KEY,
+                amount FLOAT NOT NULL,
+                category VARCHAR NOT NULL,
+                description VARCHAR,
+                expense_date DATE NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL
+            );
+        '''))
+
     print("Schema updated successfully!")
 
 if __name__ == "__main__":

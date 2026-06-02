@@ -1,0 +1,146 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from typing import List, Any
+from uuid import UUID
+from collections import defaultdict
+import datetime
+
+from app.db.database import get_db
+from app.db.models import User, FeePayment, UserRole, Expense, Student, Enrollment, Batch, Course
+from app.api.deps import get_current_user
+from app.schemas.revenue import ExpenseCreate, ExpenseResponse, RevenueDashboardData
+
+router = APIRouter()
+
+@router.post("/expenses", response_model=ExpenseResponse)
+def create_expense(
+    *,
+    db: Session = Depends(get_db),
+    expense_in: ExpenseCreate,
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Create a new expense. Admin only.
+    """
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    expense = Expense(
+        amount=expense_in.amount,
+        category=expense_in.category,
+        description=expense_in.description,
+        expense_date=expense_in.expense_date,
+        created_by=current_user.id
+    )
+    db.add(expense)
+    db.commit()
+    db.refresh(expense)
+    return expense
+
+@router.get("/expenses", response_model=List[ExpenseResponse])
+def get_expenses(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Get all expenses. Admin only.
+    """
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    return db.query(Expense).order_by(Expense.expense_date.desc()).all()
+
+@router.get("/dashboard", response_model=RevenueDashboardData)
+def get_revenue_dashboard(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Get revenue dashboard data including income, expenses, and breakdowns. Admin only.
+    """
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    # Fetch Income
+    paid_fees = db.query(FeePayment).filter(FeePayment.status == 'paid').all()
+    total_income = sum(fee.amount for fee in paid_fees)
+
+    # Fetch Expenses
+    expenses = db.query(Expense).all()
+    total_expenses = sum(exp.amount for exp in expenses)
+
+    net_profit = total_income - total_expenses
+
+    # Monthly Aggregation
+    monthly_dict = defaultdict(lambda: {"income": 0.0, "expense": 0.0})
+    
+    for fee in paid_fees:
+        if fee.paid_at:
+            month_key = fee.paid_at.strftime("%Y-%m")
+            monthly_dict[month_key]["income"] += fee.amount
+
+    for exp in expenses:
+        if exp.expense_date:
+            month_key = exp.expense_date.strftime("%Y-%m")
+            monthly_dict[month_key]["expense"] += exp.amount
+
+    # Convert to list and sort
+    monthly_data = []
+    for month in sorted(monthly_dict.keys()):
+        monthly_data.append({
+            "month": month,
+            "income": monthly_dict[month]["income"],
+            "expense": monthly_dict[month]["expense"]
+        })
+
+    # Course/Batch Breakdown
+    # A fee payment is linked to a user_id (student). We need to find their enrollments.
+    course_dict = defaultdict(float)
+    batch_dict = defaultdict(float)
+
+    for fee in paid_fees:
+        # Find student record
+        student = db.query(Student).filter(Student.user_id == fee.user_id).first()
+        if not student:
+            continue
+            
+        # Find enrollments
+        enrollments = db.query(Enrollment).filter(Enrollment.student_id == student.id).all()
+        if not enrollments:
+            continue
+            
+        # Split fee amount evenly across enrolled batches for revenue attribution
+        split_amount = fee.amount / len(enrollments)
+        
+        for enr in enrollments:
+            batch = db.query(Batch).filter(Batch.id == enr.batch_id).first()
+            if batch:
+                batch_dict[batch.name] += split_amount
+                course = db.query(Course).filter(Course.id == batch.course_id).first()
+                if course:
+                    course_dict[course.name] += split_amount
+
+    # Convert to BreakdownItem format
+    course_breakdown = []
+    for name, amt in course_dict.items():
+        percentage = (amt / total_income * 100) if total_income > 0 else 0
+        course_breakdown.append({"name": name, "amount": amt, "percentage": round(percentage, 1)})
+
+    batch_breakdown = []
+    for name, amt in batch_dict.items():
+        percentage = (amt / total_income * 100) if total_income > 0 else 0
+        batch_breakdown.append({"name": name, "amount": amt, "percentage": round(percentage, 1)})
+
+    # Sort breakdowns by amount desc
+    course_breakdown.sort(key=lambda x: x["amount"], reverse=True)
+    batch_breakdown.sort(key=lambda x: x["amount"], reverse=True)
+
+    return {
+        "total_income": total_income,
+        "total_expenses": total_expenses,
+        "net_profit": net_profit,
+        "monthly_data": monthly_data[-6:], # Last 6 months for chart brevity
+        "course_breakdown": course_breakdown,
+        "batch_breakdown": batch_breakdown
+    }

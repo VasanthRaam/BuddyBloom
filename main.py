@@ -59,6 +59,8 @@ async def startup_event():
             await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS push_token VARCHAR;"))
             await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS selected_course_ids UUID[];"))
             await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS selected_batch_ids UUID[];"))
+            # Ensure upi_id column exists on users table
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS upi_id VARCHAR;"))
             print("Successfully ran startup database migrations!")
     except Exception as e:
         print(f"Error during startup database migrations: {e}")

@@ -22,8 +22,16 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db),
     user_id = request.state.user.get("id")
     email = request.state.user.get("email")
     
-    result = await db.execute(select(User).where(User.id == user_id))
-    db_user = result.scalars().first()
+    import uuid
+    try:
+        user_uuid = uuid.UUID(str(user_id)) if user_id else None
+    except ValueError:
+        user_uuid = None
+        
+    db_user = None
+    if user_uuid:
+        result = await db.execute(select(User).where(User.id == user_uuid))
+        db_user = result.scalars().first()
     
     # Fallback to email lookup if ID mismatch
     if not db_user and email:

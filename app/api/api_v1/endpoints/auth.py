@@ -167,9 +167,17 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
     supabase_id = response.user.id
     email = response.user.email
 
+    # Convert string ID to UUID object to avoid DB type comparison issues
+    try:
+        supabase_uuid = uuid.UUID(str(supabase_id))
+    except ValueError:
+        supabase_uuid = None
+
     # 2. Fetch local profile — try by Supabase ID first, then fall back to email
-    result = await db.execute(select(User).where(User.id == supabase_id))
-    db_user = result.scalars().first()
+    db_user = None
+    if supabase_uuid:
+        result = await db.execute(select(User).where(User.id == supabase_uuid))
+        db_user = result.scalars().first()
 
     if not db_user:
         result = await db.execute(select(User).where(User.email == email))

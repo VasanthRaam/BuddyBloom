@@ -51,11 +51,17 @@ async def startup_event():
     try:
         from app.db.database import engine
         from sqlalchemy import text
+        from app.db.models import Base
         async with engine.begin() as conn:
+            # Create any missing tables (like user_push_tokens, expenses, etc.)
+            await conn.run_sync(Base.metadata.create_all)
+            # Ensure new columns exist on pending_registrations table
             await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS push_token VARCHAR;"))
-            print("Successfully migrated push_token column on startup!")
+            await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS selected_course_ids UUID[];"))
+            await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS selected_batch_ids UUID[];"))
+            print("Successfully ran startup database migrations!")
     except Exception as e:
-        print(f"Error migrating push_token: {e}")
+        print(f"Error during startup database migrations: {e}")
 
 @app.get("/")
 def root():

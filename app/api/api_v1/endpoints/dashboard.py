@@ -98,4 +98,43 @@ async def get_dashboard_stats(
                 completed_quizzes=count or 0
             )
 
+    elif role == "parent":
+        from app.db.models import Attendance, AttendanceStatus
+        # Find students linked to this parent
+        res_studs = await db.execute(select(Student).where(Student.parent_id == user_id))
+        students = res_studs.scalars().all()
+        
+        if students:
+            student_ids = [s.id for s in students]
+            
+            # Aggregated Quiz Stats
+            perf_res = await db.execute(
+                select(
+                    func.avg(
+                        case(
+                            (QuizAttempt.max_score > 0, cast(QuizAttempt.total_score, Float) / QuizAttempt.max_score),
+                            else_=0
+                        )
+                    ),
+                    func.count(QuizAttempt.id)
+                ).where(QuizAttempt.student_id.in_(student_ids))
+            )
+            avg_score, count = perf_res.first() or (0, 0)
+            
+            # Aggregated Attendance Stats
+            total_att = await db.execute(select(func.count(Attendance.id)).where(Attendance.student_id.in_(student_ids)))
+            present_att = await db.execute(
+                select(func.count(Attendance.id))
+                .where(Attendance.student_id.in_(student_ids), Attendance.status == AttendanceStatus.present)
+            )
+            total_count = total_att.scalar() or 0
+            present_count = present_att.scalar() or 0
+            attendance_rate = (present_count / total_count * 100) if total_count > 0 else 0.0
+            
+            response.student = StudentStats(
+                attendance_rate=round(attendance_rate, 1),
+                avg_quiz_score=round(float(avg_score or 0) * 100, 1),
+                completed_quizzes=count or 0
+            )
+
     return response

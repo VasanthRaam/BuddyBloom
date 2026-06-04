@@ -180,7 +180,10 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
         db_user = result.scalars().first()
 
     if not db_user:
-        result = await db.execute(select(User).where(User.email == email))
+        from sqlalchemy import func
+        result = await db.execute(
+            select(User).where(func.lower(User.email) == func.lower(email))
+        )
         db_user = result.scalars().first()
 
     # 3. Edge-case: the user exists in Supabase Auth but NOT in our DB
@@ -228,8 +231,13 @@ async def google_sync(request: GoogleSyncRequest, db: AsyncSession = Depends(get
     Sync a Google-authenticated user with our local database.
     If the user doesn't exist, return 404 so the app can redirect to Register.
     """
-    # 1. Fetch local profile by email
-    result = await db.execute(select(User).where(User.email == request.email))
+    from sqlalchemy import func
+    print(f"[GOOGLE-SYNC] Syncing user email: {request.email}")
+    
+    # 1. Fetch local profile by email (case-insensitive)
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == func.lower(request.email))
+    )
     db_user = result.scalars().first()
 
     if not db_user:

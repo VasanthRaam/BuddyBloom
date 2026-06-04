@@ -31,6 +31,7 @@ class RegisterRequest(BaseModel):
     course_ids: list[uuid.UUID] | None = []
     batch_ids: list[uuid.UUID] | None = []
     push_token: str | None = None
+    supabase_uid: uuid.UUID | None = None
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -101,7 +102,7 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
 
     # Store the pending registration (password stored temporarily for admin to create Supabase account)
     pending = PendingRegistration(
-        id=uuid.uuid4(),
+        id=request.supabase_uid if request.supabase_uid else uuid.uuid4(),
         full_name=request.full_name,
         email=request.email,
         phone=request.phone,
@@ -352,49 +353,67 @@ async def approve_registration(
             
             # 2. Supabase Auth account creation
             supabase_user_id = None
-            try:
-                sign_in_check = supabase.auth.sign_in_with_password({
-                    "email": p.email,
-                    "password": saved_password,
-                })
-                supabase_user_id = sign_in_check.user.id
-                supabase.auth.sign_out()
-            except Exception:
-                pass
-                
-            if not supabase_user_id:
+            if saved_password == "GOOGLE_AUTH_PLACEHOLDER":
+                # For Google users, they already exist in Supabase Auth
+                # The pending ID is their Supabase User ID
+                supabase_user_id = p.id
+                print(f"[APPROVE] Google user detected. Using pending ID as Supabase ID: {supabase_user_id}")
+            else:
                 try:
-                    if settings.SUPABASE_SERVICE_KEY:
-                        admin_client = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
-                        auth_response = admin_client.auth.admin.create_user({
-                            "email": p.email,
-                            "password": saved_password,
-                            "email_confirm": True,
-                        })
-                        supabase_user_id = auth_response.user.id
-                    else:
-                        auth_response = supabase.auth.sign_up({
-                            "email": p.email,
-                            "password": saved_password,
-                        })
-                        if auth_response.user:
-                            supabase_user_id = auth_response.user.id
+                    sign_in_check = supabase.auth.sign_in_with_password({
+                        "email": p.email,
+                        "password": saved_password,
+                    })
+                    supabase_user_id = sign_in_check.user.id
+                    supabase.auth.sign_out()
+                    print(f"[APPROVE] Existing user signed in successfully: {supabase_user_id}")
                 except Exception as e:
-                    err = str(e)
-                    if "already exists" in err.lower() or "already registered" in err.lower():
-                        try:
-                            admin_client_to_use = admin_client if 'admin_client' in locals() else supabase
-                            all_users_resp = admin_client_to_use.auth.admin.list_users()
-                            users_list = getattr(all_users_resp, 'users', all_users_resp)
-                            for u in users_list:
-                                if getattr(u, 'email', None) == p.email or (isinstance(u, dict) and u.get('email') == p.email):
-                                    supabase_user_id = getattr(u, 'id', None) or (isinstance(u, dict) and u.get('id'))
-                                    break
-                        except Exception:
-                            pass
+                    print(f"[APPROVE] sign_in_with_password failed (expected for new users): {e}")
+                    
+                if not supabase_user_id:
+                    try:
+                        if settings.SUPABASE_SERVICE_KEY:
+                            print(f"[APPROVE] Initializing admin client for email: {p.email}...")
+                            admin_client = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+                            auth_response = admin_client.auth.admin.create_user({
+                                "email": p.email,
+                                "password": saved_password,
+                                "email_confirm": True,
+                            })
+                            supabase_user_id = auth_response.user.id
+                            print(f"[APPROVE] Created user successfully: {supabase_user_id}")
+                        else:
+                            print(f"[APPROVE] Service key not found, using sign_up for: {p.email}...")
+                            auth_response = supabase.auth.sign_up({
+                                "email": p.email,
+                                "password": saved_password,
+                            })
+                            if auth_response.user:
+                                supabase_user_id = auth_response.user.id
+                                print(f"[APPROVE] Signed up user successfully: {supabase_user_id}")
+                    except Exception as e:
+                        print(f"[APPROVE] create_user/sign_up failed with error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        err = str(e)
+                        if "already exists" in err.lower() or "already registered" in err.lower():
+                            try:
+                                print("[APPROVE] User already exists in Supabase. Attempting to list users and find ID...")
+                                admin_client_to_use = admin_client if 'admin_client' in locals() else supabase
+                                all_users_resp = admin_client_to_use.auth.admin.list_users()
+                                users_list = getattr(all_users_resp, 'users', all_users_resp)
+                                for u in users_list:
+                                    if getattr(u, 'email', None) == p.email or (isinstance(u, dict) and u.get('email') == p.email):
+                                        supabase_user_id = getattr(u, 'id', None) or (isinstance(u, dict) and u.get('id'))
+                                        print(f"[APPROVE] Found existing user ID: {supabase_user_id}")
+                                        break
+                            except Exception as list_err:
+                                print(f"[APPROVE] list_users fallback failed: {list_err}")
+                                traceback.print_exc()
 
             if not supabase_user_id:
                 # If we still failed to get or create a Supabase ID, restore status to pending so admin can retry
+                print(f"[APPROVE] Failed to obtain Supabase ID for {p.email}. Reverting pending status to 'pending'.")
                 p.status = "pending"
                 await session.commit()
                 return

@@ -343,7 +343,7 @@ async def approve_registration(
         async with AsyncSessionLocal() as session:
             # 1. Fetch pending record again inside background session
             p_res = await session.execute(
-                select(PendingRegistration).where(PendingRegistration.id == UUID(p_id_str))
+                select(PendingRegistration).where(PendingRegistration.id == uuid.UUID(p_id_str))
             )
             p = p_res.scalars().first()
             if not p:

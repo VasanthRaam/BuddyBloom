@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 from typing import List, Any
 from uuid import UUID
 
@@ -12,22 +12,24 @@ from app.schemas.fees import FeeCreateBulk, FeeResponse, AdminUPISchema
 router = APIRouter()
 
 @router.post("/", response_model=List[FeeResponse])
-def create_fee_reminder(
+async def create_fee_reminder(
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     fee_in: FeeCreateBulk,
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
     Create a new fee reminder for multiple students and send notifications. Admin only.
     """
-    if current_user.role != UserRole.admin:
+    if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
     created_fees = []
     
     for uid in fee_in.user_ids:
-        student = db.query(User).filter(User.id == uid, User.role == UserRole.student).first()
+        # Check if user is a student
+        student_res = await db.execute(select(User).where(User.id == uid, User.role == UserRole.student))
+        student = student_res.scalars().first()
         if not student:
             continue
             
@@ -49,93 +51,110 @@ def create_fee_reminder(
         
         created_fees.append(fee)
 
-    db.commit()
+    await db.commit()
     for fee in created_fees:
-        db.refresh(fee)
+        await db.refresh(fee)
         
     return created_fees
 
 @router.get("/", response_model=List[FeeResponse])
-def get_fees(
-    db: Session = Depends(get_db),
+async def get_fees(
+    db: AsyncSession = Depends(get_db),
     student_id: UUID = None,
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
     Get fee payments. Admin can filter by student_id.
     Students can only see their own fees.
     """
-    query = db.query(FeePayment)
+    role = current_user.get("role")
+    user_uuid = UUID(current_user["id"])
     
-    if current_user.role == UserRole.admin:
+    if role == "admin":
+        query = select(FeePayment)
         if student_id:
-            query = query.filter(FeePayment.user_id == student_id)
-    elif current_user.role == UserRole.student:
-        query = query.filter(FeePayment.user_id == current_user.id)
+            query = query.where(FeePayment.user_id == student_id)
+    elif role == "student":
+        query = select(FeePayment).where(FeePayment.user_id == user_uuid)
     else:
         # parent or teacher shouldn't see this unless requested, for now restrict or let parent see
-        if current_user.role == UserRole.parent:
-             query = query.join(User).filter(User.id == FeePayment.user_id) # Need logic for parent's students, skipping for simplicity, just return empty
+        if role == "parent":
+             # Need logic for parent's students, skipping for simplicity, just return empty
              return []
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
-    return query.all()
+    res = await db.execute(query)
+    return res.scalars().all()
 
 @router.put("/{fee_id}/receive", response_model=FeeResponse)
-def mark_fee_received(
+async def mark_fee_received(
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     fee_id: UUID,
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
     Mark a fee as paid. Admin only.
     """
-    if current_user.role != UserRole.admin:
+    if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
-    fee = db.query(FeePayment).filter(FeePayment.id == fee_id).first()
+    fee_res = await db.execute(select(FeePayment).where(FeePayment.id == fee_id))
+    fee = fee_res.scalars().first()
     if not fee:
         raise HTTPException(status_code=404, detail="Fee payment not found")
 
     fee.status = "paid"
     fee.paid_at = func.now()
     db.add(fee)
-    db.commit()
-    db.refresh(fee)
+    await db.commit()
+    await db.refresh(fee)
     return fee
 
 @router.get("/admin-upi", response_model=AdminUPISchema)
-def get_admin_upi(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+async def get_admin_upi(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
     Get the admin's UPI ID.
     If called by an admin, return their own UPI ID if available.
     Otherwise, return the first admin's UPI ID.
     """
-    if current_user.role == UserRole.admin:
-        return {"upi_id": current_user.upi_id or ""}
+    role = current_user.get("role")
+    user_uuid = UUID(current_user["id"])
+    
+    if role == "admin":
+        user_res = await db.execute(select(User).where(User.id == user_uuid))
+        admin_user = user_res.scalars().first()
+        return {"upi_id": admin_user.upi_id if (admin_user and admin_user.upi_id) else ""}
         
-    admin = db.query(User).filter(User.role == UserRole.admin, User.upi_id != None).first()
+    admin_res = await db.execute(select(User).where(User.role == UserRole.admin, User.upi_id != None))
+    admin = admin_res.scalars().first()
     return {"upi_id": admin.upi_id if admin else ""}
 
 @router.put("/admin-upi", response_model=AdminUPISchema)
-def update_admin_upi(
+async def update_admin_upi(
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     upi_in: AdminUPISchema,
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
     Update the admin's UPI ID. Admin only.
     """
-    if current_user.role != UserRole.admin:
+    if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
-    current_user.upi_id = upi_in.upi_id
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
-    return {"upi_id": current_user.upi_id}
+    user_uuid = UUID(current_user["id"])
+    user_res = await db.execute(select(User).where(User.id == user_uuid))
+    db_user = user_res.scalars().first()
+    
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    db_user.upi_id = upi_in.upi_id
+    db.add(db_user)
+    await db.commit()
+    await db.refresh(db_user)
+    return {"upi_id": db_user.upi_id}

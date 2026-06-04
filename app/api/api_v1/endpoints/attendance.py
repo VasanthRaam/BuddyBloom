@@ -84,7 +84,9 @@ async def mark_holiday(
     current_user: dict = Depends(RequireRole(["admin"]))
 ):
     """Mark a specific date as an academy holiday. Only Admins."""
-    from app.db.models import AcademyHoliday
+    from app.db.models import AcademyHoliday, Attendance
+    from sqlalchemy import delete
+    from app.services.notification_service import NotificationService
     
     # Check if exists
     res = await db.execute(select(AcademyHoliday).where(AcademyHoliday.date == holiday_date))
@@ -94,10 +96,22 @@ async def mark_holiday(
     db_holiday = AcademyHoliday(
         date=holiday_date,
         description=description,
-        created_by=current_user["id"]
+        created_by=UUID(current_user["id"])
     )
     db.add(db_holiday)
+    
+    # Delete any existing attendance records for all students on this date
+    # so that it does not count towards their attendance rate calculations.
+    await db.execute(delete(Attendance).where(Attendance.date == holiday_date))
+    
     await db.commit()
+    
+    # Send push and in-app notifications to all students
+    try:
+        await NotificationService.notify_all_students_for_holiday(db, holiday_date, description)
+    except Exception as e:
+        print(f"⚠️ [HOLIDAY] Failed to notify students: {e}")
+        
     return {"message": "Academy holiday marked successfully", "date": holiday_date}
 
 @router.delete("/holidays/{holiday_date}")

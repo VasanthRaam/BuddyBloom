@@ -122,7 +122,7 @@ class NotificationService:
         from app.db.models import User, UserRole
         
         # Find all admins
-        query = select(User.id).where(User.role == UserRole.ADMIN)
+        query = select(User.id).where(User.role == UserRole.admin)
         result = await db.execute(query)
         admin_ids = result.scalars().all()
         
@@ -150,3 +150,42 @@ class NotificationService:
         
         await db.commit()
         return len(admin_ids)
+
+    @staticmethod
+    async def notify_all_students_for_holiday(db: AsyncSession, holiday_date, description: str = ""):
+        """
+        Notify all students about a new academy holiday.
+        """
+        from app.db.models import User, UserRole
+        
+        # Find all student users
+        query = select(User.id).where(User.role == UserRole.student)
+        result = await db.execute(query)
+        student_ids = result.scalars().all()
+        
+        title = "Academy Holiday! 🏖️"
+        message = f"Academy has declared a holiday on {holiday_date.strftime('%Y-%m-%d')}."
+        if description:
+            message += f" ({description})"
+            
+        for sid in student_ids:
+            # 1. Save In-App Notification
+            db_notification = Notification(
+                user_id=sid,
+                title=title,
+                message=message,
+                link_to="Attendance"
+            )
+            db.add(db_notification)
+            
+            # 2. Trigger Real-Time Push Notification
+            await NotificationService.send_push_notification(
+                db, 
+                sid, 
+                title, 
+                message, 
+                {"type": "holiday", "date": str(holiday_date)}
+            )
+            
+        await db.commit()
+        return len(student_ids)

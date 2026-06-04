@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import List, Any
 from uuid import UUID
 from collections import defaultdict
@@ -14,16 +14,16 @@ from app.schemas.revenue import ExpenseCreate, ExpenseResponse, RevenueDashboard
 router = APIRouter()
 
 @router.post("/expenses", response_model=ExpenseResponse)
-def create_expense(
+async def create_expense(
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     expense_in: ExpenseCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
     Create a new expense. Admin only.
     """
-    if current_user.role != UserRole.admin:
+    if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
     expense = Expense(
@@ -31,43 +31,46 @@ def create_expense(
         category=expense_in.category,
         description=expense_in.description,
         expense_date=expense_in.expense_date,
-        created_by=current_user.id
+        created_by=UUID(current_user["id"])
     )
     db.add(expense)
-    db.commit()
-    db.refresh(expense)
+    await db.commit()
+    await db.refresh(expense)
     return expense
 
 @router.get("/expenses", response_model=List[ExpenseResponse])
-def get_expenses(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+async def get_expenses(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
     Get all expenses. Admin only.
     """
-    if current_user.role != UserRole.admin:
+    if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
-    return db.query(Expense).order_by(Expense.expense_date.desc()).all()
+    result = await db.execute(select(Expense).order_by(Expense.expense_date.desc()))
+    return result.scalars().all()
 
 @router.get("/dashboard", response_model=RevenueDashboardData)
-def get_revenue_dashboard(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+async def get_revenue_dashboard(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
     Get revenue dashboard data including income, expenses, and breakdowns. Admin only.
     """
-    if current_user.role != UserRole.admin:
+    if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
     # Fetch Income
-    paid_fees = db.query(FeePayment).filter(FeePayment.status == 'paid').all()
+    paid_fees_res = await db.execute(select(FeePayment).where(FeePayment.status == 'paid'))
+    paid_fees = paid_fees_res.scalars().all()
     total_income = sum(fee.amount for fee in paid_fees)
 
     # Fetch Expenses
-    expenses = db.query(Expense).all()
+    expenses_res = await db.execute(select(Expense))
+    expenses = expenses_res.scalars().all()
     total_expenses = sum(exp.amount for exp in expenses)
 
     net_profit = total_income - total_expenses
@@ -101,12 +104,14 @@ def get_revenue_dashboard(
 
     for fee in paid_fees:
         # Find student record
-        student = db.query(Student).filter(Student.user_id == fee.user_id).first()
+        student_res = await db.execute(select(Student).where(Student.user_id == fee.user_id))
+        student = student_res.scalars().first()
         if not student:
             continue
             
         # Find enrollments
-        enrollments = db.query(Enrollment).filter(Enrollment.student_id == student.id).all()
+        enrollments_res = await db.execute(select(Enrollment).where(Enrollment.student_id == student.id))
+        enrollments = enrollments_res.scalars().all()
         if not enrollments:
             continue
             
@@ -114,10 +119,12 @@ def get_revenue_dashboard(
         split_amount = fee.amount / len(enrollments)
         
         for enr in enrollments:
-            batch = db.query(Batch).filter(Batch.id == enr.batch_id).first()
+            batch_res = await db.execute(select(Batch).where(Batch.id == enr.batch_id))
+            batch = batch_res.scalars().first()
             if batch:
                 batch_dict[batch.name] += split_amount
-                course = db.query(Course).filter(Course.id == batch.course_id).first()
+                course_res = await db.execute(select(Course).where(Course.id == batch.course_id))
+                course = course_res.scalars().first()
                 if course:
                     course_dict[course.name] += split_amount
 

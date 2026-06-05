@@ -42,7 +42,7 @@ Do not generate harmful or unrelated content.
 
 If a question is outside academy learning, politely redirect the student."""
 
-    def generate_response(self, message: str) -> str:
+    def generate_response(self, message: str, history: list = None) -> str:
         if not settings.GEMINI_API_KEY:
             raise HTTPException(status_code=500, detail="Gemini API Key not configured")
         
@@ -51,7 +51,28 @@ If a question is outside academy learning, politely redirect the student."""
                 model_name=self.model_name,
                 system_instruction=self.system_prompt
             )
-            response = model.generate_content(message)
+            
+            if history:
+                # Format history for Google Gemini SDK. Roles must be 'user' or 'model'.
+                formatted_history = []
+                for msg in history:
+                    role = msg.get("role")
+                    # Ensure role is either 'user' or 'model'
+                    if role in ("assistant", "bot", "model"):
+                        role = "model"
+                    else:
+                        role = "user"
+                    
+                    formatted_history.append({
+                        "role": role,
+                        "parts": [msg.get("content", "")]
+                    })
+                
+                chat = model.start_chat(history=formatted_history)
+                response = chat.send_message(message)
+            else:
+                response = model.generate_content(message)
+                
             return response.text
         except Exception as e:
             logger.error(f"Error calling Gemini API: {str(e)}")
@@ -59,3 +80,4 @@ If a question is outside academy learning, politely redirect the student."""
 
 def get_gemini_service() -> GeminiService:
     return GeminiService()
+

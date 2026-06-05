@@ -13,6 +13,8 @@ class FeeCreateBulk(BaseModel):
     user_ids: List[UUID]
     amount: float
     due_date: datetime
+    course_id: Optional[UUID] = None
+    batch_id: Optional[UUID] = None
 
 class FeeResponse(BaseModel):
     id: UUID
@@ -22,6 +24,8 @@ class FeeResponse(BaseModel):
     due_date: Optional[datetime]
     paid_at: Optional[datetime]
     created_at: datetime
+    course_id: Optional[UUID] = None
+    batch_id: Optional[UUID] = None
     user: Optional[UserResponse] = None
 
     class Config:

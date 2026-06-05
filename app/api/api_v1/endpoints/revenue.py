@@ -103,7 +103,27 @@ async def get_revenue_dashboard(
     batch_dict = defaultdict(float)
 
     for fee in paid_fees:
-        # Find student record
+        # If the fee is explicitly linked to a course and/or batch, attribute the entire amount directly
+        if fee.course_id or fee.batch_id:
+            batch = None
+            if fee.batch_id:
+                batch_res = await db.execute(select(Batch).where(Batch.id == fee.batch_id))
+                batch = batch_res.scalars().first()
+                if batch:
+                    batch_dict[batch.name] += fee.amount
+            if fee.course_id:
+                course_res = await db.execute(select(Course).where(Course.id == fee.course_id))
+                course = course_res.scalars().first()
+                if course:
+                    course_dict[course.name] += fee.amount
+            elif batch: # fallback if course_id is null but batch_id is set
+                course_res = await db.execute(select(Course).where(Course.id == batch.course_id))
+                course = course_res.scalars().first()
+                if course:
+                    course_dict[course.name] += fee.amount
+            continue
+
+        # Fallback for historical fee payments (split evenly across student's enrollments)
         student_res = await db.execute(select(Student).where(Student.user_id == fee.user_id))
         student = student_res.scalars().first()
         if not student:

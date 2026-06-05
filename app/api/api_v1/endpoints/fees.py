@@ -39,7 +39,9 @@ async def create_fee_reminder(
                 user_id=uid,
                 amount=fee_in.amount,
                 due_date=fee_in.due_date,
-                status="pending"
+                status="pending",
+                course_id=fee_in.course_id,
+                batch_id=fee_in.batch_id
             )
             db.add(fee)
             

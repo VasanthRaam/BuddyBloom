@@ -55,6 +55,20 @@ async def create_fee_reminder(
 
         await db.commit()
         
+        # Send push notifications to all users after committing database records
+        from app.services.notification_service import NotificationService
+        for uid in fee_in.user_ids:
+            try:
+                await NotificationService.send_push_notification(
+                    db,
+                    uid,
+                    "Fee Reminder 💳",
+                    f"You have a pending fee of ₹{fee_in.amount} due by {fee_in.due_date.strftime('%Y-%m-%d')}.",
+                    {"type": "fee", "screen": "Fees"}
+                )
+            except Exception as e:
+                print(f"⚠️ [FEES] Failed to send push notification to user {uid}: {e}")
+
         # Query created fees back eagerly with selectinload(FeePayment.user)
         # to avoid lazy loading crashes during response serialization
         if created_fees:

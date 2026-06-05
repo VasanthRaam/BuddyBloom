@@ -10,3 +10,4 @@ supabase>=2.0.0
 greenlet>=2.0.0
 email-validator>=2.0.0
 httpx>=0.25.0
+google-generativeai>=0.8.0

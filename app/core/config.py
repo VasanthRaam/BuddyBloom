@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str = ""  # Optional: service_role key for admin user creation
     SUPABASE_JWT_SECRET: str
 
+    # Gemini API
+    GEMINI_API_KEY: str = ""
+
     # Database
     DATABASE_URL: str
 

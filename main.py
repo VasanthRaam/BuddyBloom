@@ -26,7 +26,12 @@ app = FastAPI(
 
 from app.core.middleware import SupabaseAuthMiddleware, NoCacheMiddleware
 
+# Add JWT Authentication and No-Cache Middleware
+app.add_middleware(SupabaseAuthMiddleware)
+app.add_middleware(NoCacheMiddleware)
+
 # Set all CORS enabled origins
+# Must be added LAST so it's the outermost middleware!
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -40,10 +45,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
-
-# Add JWT Authentication and No-Cache Middleware
-app.add_middleware(SupabaseAuthMiddleware)
-app.add_middleware(NoCacheMiddleware)
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 

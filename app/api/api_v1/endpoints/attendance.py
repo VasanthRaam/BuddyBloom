@@ -128,6 +128,27 @@ async def remove_holiday(
     await db.commit()
     return {"message": "Holiday removed"}
 
+@router.post("/leave_requests", response_model=LeaveRequestResponse, status_code=201)
+async def create_leave_request(
+    request: LeaveRequestCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(RequireRole(["student", "parent"]))
+):
+    """
+    Submit a leave request.
+    """
+    from app.db.models import LeaveRequest, Student, Notification, User
+    from uuid import UUID
+
+    # Get student profile
+    res = await db.execute(select(Student).where(Student.user_id == UUID(current_user["id"])))
+    student = res.scalars().first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student profile not found")
+
+    leave_req = LeaveRequest(
+        student_id=student.id,
+        start_date=request.start_date,
         end_date=request.end_date,
         reason=request.reason,
         status="pending"

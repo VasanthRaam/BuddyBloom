@@ -6,7 +6,7 @@ from uuid import UUID
 from datetime import date
 
 from app.db.database import get_db
-from app.schemas.attendance import AttendanceBulkCreate, AttendanceResponse, HolidayResponse
+from app.schemas.attendance import AttendanceBulkCreate, AttendanceResponse, HolidayResponse, LeaveRequestCreate, LeaveRequestResponse
 from app.services.attendance_service import AttendanceService
 from app.api.deps import get_current_user, RequireRole
 

@@ -40,13 +40,16 @@ async def chat_with_tutor(
             for msg in history_msgs
         ]
         
-        # 3. Call Gemini service with history
+        # 3. Save the user message to the database first, so it gets an earlier created_at timestamp
+        user_msg = ChatMessage(user_id=user_uuid, role="user", content=request.message)
+        db.add(user_msg)
+        await db.commit()
+        
+        # 4. Call Gemini service with history
         reply = gemini_service.generate_response(request.message, history=history_list)
         
-        # 4. Save both the user message and model reply in the database
-        user_msg = ChatMessage(user_id=user_uuid, role="user", content=request.message)
+        # 5. Save the model reply to the database
         bot_msg = ChatMessage(user_id=user_uuid, role="model", content=reply)
-        db.add(user_msg)
         db.add(bot_msg)
         await db.commit()
         

@@ -36,3 +36,30 @@ async def get_courses(
             "description": c.description
         } for c in courses
     ]
+
+@router.get("/all")
+async def get_all_courses(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Public endpoint for getting all courses and their batches, 
+    used for new enrollments and registrations.
+    """
+    from sqlalchemy.orm import selectinload
+    query = select(Course).options(selectinload(Course.batches))
+    result = await db.execute(query)
+    courses = result.scalars().all()
+    
+    return [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "description": c.description,
+            "batches": [
+                {
+                    "id": str(b.id),
+                    "name": b.name
+                } for b in c.batches
+            ]
+        } for c in courses
+    ]

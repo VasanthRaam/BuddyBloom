@@ -338,3 +338,31 @@ class ChatMessage(Base):
     user = relationship("User", backref="chat_messages")
 
 
+class PendingEnrollment(Base):
+    __tablename__ = "pending_enrollments"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    student_id = Column(UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey("batches.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String, default="pending")  # pending, approved, rejected
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    student = relationship("Student")
+    batch = relationship("Batch")
+
+
+class LeaveRequest(Base):
+    __tablename__ = "leave_requests"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    student_id = Column(UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    reason = Column(Text, nullable=False)
+    status = Column(String, default="pending")  # pending, approved, rejected
+    handled_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    student = relationship("Student")
+    handler = relationship("User")

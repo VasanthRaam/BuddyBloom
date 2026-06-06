@@ -156,6 +156,25 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
     """
     Authenticate via Supabase then verify the local profile is approved.
     """
+    from sqlalchemy import func
+    
+    # 0. Check if user is pending registration FIRST.
+    pend_res = await db.execute(
+        select(PendingRegistration).where(func.lower(PendingRegistration.email) == func.lower(request.email))
+    )
+    pending = pend_res.scalars().first()
+    if pending:
+        if pending.status == "pending":
+            raise HTTPException(
+                status_code=403,
+                detail="Your registration is pending admin approval. Please wait."
+            )
+        elif pending.status == "rejected":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Your registration was rejected. Reason: {pending.rejection_reason}"
+            )
+
     # 1. Try Supabase auth
     try:
         response = supabase.auth.sign_in_with_password({
@@ -218,6 +237,7 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
         "email": db_user.email,
         "role": _role_value(db_user.role),
         "full_name": db_user.full_name,
+        "created_at": db_user.created_at.isoformat() if db_user.created_at else None,
     }
 
     return {

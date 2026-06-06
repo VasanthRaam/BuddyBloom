@@ -127,3 +127,151 @@ async def remove_holiday(
     await db.execute(delete(AcademyHoliday).where(AcademyHoliday.date == holiday_date))
     await db.commit()
     return {"message": "Holiday removed"}
+
+        end_date=request.end_date,
+        reason=request.reason,
+        status="pending"
+    )
+    db.add(leave_req)
+    
+    # Notify Admin and Teachers
+    admin_res = await db.execute(select(User).where(User.role == "admin"))
+    admins = admin_res.scalars().all()
+    
+    for admin in admins:
+        db.add(Notification(
+            user_id=admin.id,
+            title="New Leave Request",
+            message=f"{student.first_name} requested leave from {request.start_date} to {request.end_date}.",
+            link_to="PendingApprovals"
+        ))
+    
+    await db.commit()
+    await db.refresh(leave_req)
+    return leave_req
+
+@router.get("/leave_requests", response_model=List[LeaveRequestResponse])
+async def get_leave_requests(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(RequireRole(["admin", "teacher"]))
+):
+    """
+    Get all pending leave requests for Admins and Teachers.
+    """
+    from app.db.models import LeaveRequest
+    from sqlalchemy.orm import selectinload
+    
+    # For now, return all pending requests. In a more advanced setup, teachers 
+    # would only see requests for students in their batches.
+    result = await db.execute(
+        select(LeaveRequest)
+        .options(selectinload(LeaveRequest.student))
+        .where(LeaveRequest.status == "pending")
+        .order_by(LeaveRequest.created_at.asc())
+    )
+    requests = result.scalars().all()
+    
+    response = []
+    for req in requests:
+        res = LeaveRequestResponse.model_validate(req)
+        res.student_name = f"{req.student.first_name} {req.student.last_name}" if req.student else None
+        response.append(res)
+        
+    return response
+
+@router.post("/leave_requests/{request_id}/approve")
+async def approve_leave_request(
+    request_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(RequireRole(["admin", "teacher"]))
+):
+    """Approve a leave request and create excused attendance records."""
+    from app.db.models import LeaveRequest, Attendance, Notification, Enrollment
+    from sqlalchemy.orm import selectinload
+    import datetime
+    
+    result = await db.execute(
+        select(LeaveRequest)
+        .options(selectinload(LeaveRequest.student))
+        .where(LeaveRequest.id == request_id)
+    )
+    leave_req = result.scalars().first()
+    if not leave_req or leave_req.status != "pending":
+        raise HTTPException(status_code=404, detail="Pending leave request not found.")
+        
+    leave_req.status = "approved"
+    leave_req.handled_by = UUID(current_user["id"])
+    
+    # Create excused attendance records for all enrolled batches during this date range
+    enr_res = await db.execute(select(Enrollment).where(Enrollment.student_id == leave_req.student_id))
+    enrollments = enr_res.scalars().all()
+    
+    current_date = leave_req.start_date
+    delta = datetime.timedelta(days=1)
+    
+    while current_date <= leave_req.end_date:
+        for enr in enrollments:
+            # Check if record already exists to prevent duplicate key errors
+            att_check = await db.execute(select(Attendance).where(
+                Attendance.student_id == leave_req.student_id,
+                Attendance.batch_id == enr.batch_id,
+                Attendance.date == current_date
+            ))
+            if not att_check.scalars().first():
+                att = Attendance(
+                    student_id=leave_req.student_id,
+                    batch_id=enr.batch_id,
+                    date=current_date,
+                    status="excused",
+                    remarks="Approved Leave"
+                )
+                db.add(att)
+        current_date += delta
+        
+    # Notify student/parent
+    user_id_to_notify = leave_req.student.user_id or leave_req.student.parent_id
+    if user_id_to_notify:
+        db.add(Notification(
+            user_id=user_id_to_notify,
+            title="Leave Approved",
+            message=f"Leave request for {leave_req.start_date} to {leave_req.end_date} has been approved.",
+            link_to="Attendance"
+        ))
+        
+    await db.commit()
+    return {"message": "Leave request approved and attendance marked."}
+
+@router.post("/leave_requests/{request_id}/reject")
+async def reject_leave_request(
+    request_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(RequireRole(["admin", "teacher"]))
+):
+    """Reject a leave request."""
+    from app.db.models import LeaveRequest, Notification
+    from sqlalchemy.orm import selectinload
+    
+    result = await db.execute(
+        select(LeaveRequest)
+        .options(selectinload(LeaveRequest.student))
+        .where(LeaveRequest.id == request_id)
+    )
+    leave_req = result.scalars().first()
+    if not leave_req or leave_req.status != "pending":
+        raise HTTPException(status_code=404, detail="Pending leave request not found.")
+        
+    leave_req.status = "rejected"
+    leave_req.handled_by = UUID(current_user["id"])
+    
+    # Notify student/parent
+    user_id_to_notify = leave_req.student.user_id or leave_req.student.parent_id
+    if user_id_to_notify:
+        db.add(Notification(
+            user_id=user_id_to_notify,
+            title="Leave Rejected",
+            message=f"Leave request for {leave_req.start_date} to {leave_req.end_date} was rejected.",
+            link_to="Attendance"
+        ))
+        
+    await db.commit()
+    return {"message": "Leave request rejected."}

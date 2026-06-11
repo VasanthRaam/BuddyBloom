@@ -158,8 +158,32 @@ async def mark_fee_received(
         fee.status = "paid"
         fee.paid_at = func.now()
         db.add(fee)
+        
+        # Notify student/parent
+        notif = Notification(
+            user_id=fee.user_id,
+            title="Fee Payment Received",
+            message=f"Your fee payment of ₹{fee.amount} has been successfully received and verified.",
+            link_to="Fees"
+        )
+        db.add(notif)
+        
         await db.commit()
         await db.refresh(fee)
+
+        # Trigger push notification
+        from app.services.notification_service import NotificationService
+        try:
+            await NotificationService.send_push_notification(
+                db,
+                fee.user_id,
+                "Fee Payment Received ✅",
+                f"Your fee payment of ₹{fee.amount} has been successfully received and verified.",
+                {"type": "fee_payment", "screen": "Fees"}
+            )
+        except Exception as e:
+            print(f"⚠️ [FEES] Failed to send push notification to user {fee.user_id}: {e}")
+
         return fee
     except Exception as e:
         import traceback

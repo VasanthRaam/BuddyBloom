@@ -74,6 +74,7 @@ async def request_enrollment(
     
     # Notify Admin
     from app.db.models import User
+    from app.services.notification_service import NotificationService
     admin_res = await db.execute(select(User).where(User.role == UserRole.admin))
     admins = admin_res.scalars().all()
     for admin in admins:
@@ -87,6 +88,19 @@ async def request_enrollment(
         
     await db.commit()
     await db.refresh(pending_enrollment)
+    
+    # Trigger push notifications for admins
+    for admin in admins:
+        try:
+            await NotificationService.send_push_notification(
+                db,
+                admin.id,
+                "New Enrollment Request 📝",
+                f"{student.first_name} {student.last_name} requested to join a new course.",
+                {"type": "enrollment_request", "action": "approval", "screen": "PendingApprovals"}
+            )
+        except Exception as e:
+            print(f"⚠️ [ENROLLMENT] Failed to send push notification to admin {admin.id}: {e}")
     
     return PendingEnrollmentResponse(
         id=pending_enrollment.id,
@@ -175,6 +189,20 @@ async def approve_enrollment(
         db.add(notif)
         
     await db.commit()
+
+    # Trigger push notification for student/parent
+    if user_id_to_notify:
+        from app.services.notification_service import NotificationService
+        try:
+            await NotificationService.send_push_notification(
+                db,
+                user_id_to_notify,
+                "Enrollment Approved 🎉",
+                f"Your request to join {course_name} has been approved!",
+                {"type": "enrollment_approved", "screen": "MyCourses"}
+            )
+        except Exception as e:
+            print(f"⚠️ [ENROLLMENT] Failed to send push notification to user {user_id_to_notify}: {e}")
     return {"message": "Enrollment approved."}
 
 @router.post("/{enrollment_id}/reject")
@@ -213,4 +241,18 @@ async def reject_enrollment(
         db.add(notif)
         
     await db.commit()
+
+    # Trigger push notification for student/parent
+    if user_id_to_notify:
+        from app.services.notification_service import NotificationService
+        try:
+            await NotificationService.send_push_notification(
+                db,
+                user_id_to_notify,
+                "Enrollment Rejected ❌",
+                f"Your request to join {course_name} was rejected.",
+                {"type": "enrollment_rejected", "screen": "MyCourses"}
+            )
+        except Exception as e:
+            print(f"⚠️ [ENROLLMENT] Failed to send push notification to user {user_id_to_notify}: {e}")
     return {"message": "Enrollment rejected."}

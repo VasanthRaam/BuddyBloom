@@ -156,6 +156,7 @@ async def create_leave_request(
     db.add(leave_req)
     
     # Notify Admin and Teachers
+    from app.services.notification_service import NotificationService
     admin_res = await db.execute(select(User).where(User.role == "admin"))
     admins = admin_res.scalars().all()
     
@@ -168,6 +169,19 @@ async def create_leave_request(
         ))
     
     await db.commit()
+
+    # Trigger push notifications for admins
+    for admin in admins:
+        try:
+            await NotificationService.send_push_notification(
+                db,
+                admin.id,
+                "New Leave Request 📅",
+                f"{student.first_name} requested leave from {request.start_date} to {request.end_date}.",
+                {"type": "leave_request", "action": "approval", "screen": "PendingApprovals"}
+            )
+        except Exception as e:
+            print(f"⚠️ [LEAVE] Failed to send push notification to admin {admin.id}: {e}")
     await db.refresh(leave_req)
     return leave_req
 
@@ -260,6 +274,20 @@ async def approve_leave_request(
         ))
         
     await db.commit()
+
+    # Trigger push notification for student/parent
+    if user_id_to_notify:
+        from app.services.notification_service import NotificationService
+        try:
+            await NotificationService.send_push_notification(
+                db,
+                user_id_to_notify,
+                "Leave Approved ✅",
+                f"Leave request for {leave_req.start_date} to {leave_req.end_date} has been approved.",
+                {"type": "leave_approved", "screen": "Attendance"}
+            )
+        except Exception as e:
+            print(f"⚠️ [LEAVE] Failed to send push notification to user {user_id_to_notify}: {e}")
     return {"message": "Leave request approved and attendance marked."}
 
 @router.post("/leave_requests/{request_id}/reject")
@@ -295,4 +323,18 @@ async def reject_leave_request(
         ))
         
     await db.commit()
+
+    # Trigger push notification for student/parent
+    if user_id_to_notify:
+        from app.services.notification_service import NotificationService
+        try:
+            await NotificationService.send_push_notification(
+                db,
+                user_id_to_notify,
+                "Leave Rejected ❌",
+                f"Leave request for {leave_req.start_date} to {leave_req.end_date} was rejected.",
+                {"type": "leave_rejected", "screen": "Attendance"}
+            )
+        except Exception as e:
+            print(f"⚠️ [LEAVE] Failed to send push notification to user {user_id_to_notify}: {e}")
     return {"message": "Leave request rejected."}

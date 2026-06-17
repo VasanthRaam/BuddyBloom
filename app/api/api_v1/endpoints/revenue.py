@@ -93,8 +93,8 @@ async def get_revenue_dashboard(
     for month in sorted(monthly_dict.keys()):
         monthly_data.append({
             "month": month,
-            "income": monthly_dict[month]["income"],
-            "expense": monthly_dict[month]["expense"]
+            "income": round(monthly_dict[month]["income"], 1),
+            "expense": round(monthly_dict[month]["expense"], 1)
         })
 
     # Course/Batch Breakdown
@@ -152,21 +152,21 @@ async def get_revenue_dashboard(
     course_breakdown = []
     for name, amt in course_dict.items():
         percentage = (amt / total_income * 100) if total_income > 0 else 0
-        course_breakdown.append({"name": name, "amount": amt, "percentage": round(percentage, 1)})
+        course_breakdown.append({"name": name, "amount": round(amt, 1), "percentage": round(percentage, 1)})
 
     batch_breakdown = []
     for name, amt in batch_dict.items():
         percentage = (amt / total_income * 100) if total_income > 0 else 0
-        batch_breakdown.append({"name": name, "amount": amt, "percentage": round(percentage, 1)})
+        batch_breakdown.append({"name": name, "amount": round(amt, 1), "percentage": round(percentage, 1)})
 
     # Sort breakdowns by amount desc
     course_breakdown.sort(key=lambda x: x["amount"], reverse=True)
     batch_breakdown.sort(key=lambda x: x["amount"], reverse=True)
 
     return {
-        "total_income": total_income,
-        "total_expenses": total_expenses,
-        "net_profit": net_profit,
+        "total_income": round(total_income, 1),
+        "total_expenses": round(total_expenses, 1),
+        "net_profit": round(net_profit, 1),
         "monthly_data": monthly_data[-6:], # Last 6 months for chart brevity
         "course_breakdown": course_breakdown,
         "batch_breakdown": batch_breakdown

@@ -16,6 +16,20 @@ class FeeCreateBulk(BaseModel):
     course_id: Optional[UUID] = None
     batch_id: Optional[UUID] = None
 
+class CourseMinResponse(BaseModel):
+    id: UUID
+    name: str
+
+    class Config:
+        from_attributes = True
+
+class BatchMinResponse(BaseModel):
+    id: UUID
+    name: str
+
+    class Config:
+        from_attributes = True
+
 class FeeResponse(BaseModel):
     id: UUID
     user_id: UUID
@@ -27,6 +41,8 @@ class FeeResponse(BaseModel):
     course_id: Optional[UUID] = None
     batch_id: Optional[UUID] = None
     user: Optional[UserResponse] = None
+    course: Optional[CourseMinResponse] = None
+    batch: Optional[BatchMinResponse] = None
 
     class Config:
         from_attributes = True

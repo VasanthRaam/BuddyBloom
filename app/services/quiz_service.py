@@ -193,21 +193,31 @@ class QuizService:
         }
 
     @staticmethod
-    async def get_attempts(db: AsyncSession, user_id: UUID, role: str, quiz_id: UUID | None = None, batch_id: UUID | None = None) -> list[QuizAttempt]:
+    async def get_attempts(db: AsyncSession, user_id: UUID, role: str, quiz_id: UUID | None = None, batch_id: UUID | None = None, course_id: UUID | None = None) -> list[QuizAttempt]:
         query = select(QuizAttempt).options(
             selectinload(QuizAttempt.quiz).selectinload(Quiz.questions), 
+            selectinload(QuizAttempt.quiz).selectinload(Quiz.course), 
             selectinload(QuizAttempt.student)
         )
         
         if quiz_id:
             query = query.where(QuizAttempt.quiz_id == quiz_id)
             
+        if course_id:
+            query = query.join(Quiz).where(Quiz.course_id == course_id)
+            # Need to avoid duplicate join if role joins Quiz again
+            quiz_joined = True
+        else:
+            quiz_joined = False
+            
         if role == UserRole.admin:
             if batch_id:
                 query = query.join(Student).join(Enrollment).where(Enrollment.batch_id == batch_id)
         elif role == UserRole.teacher:
             # Attempts for quizzes they created or courses they teach
-            query = query.join(Quiz).join(Course).join(Batch, isouter=True)
+            if not quiz_joined:
+                query = query.join(Quiz)
+            query = query.join(Course).join(Batch, isouter=True)
             if batch_id:
                 query = query.where(Batch.id == batch_id)
             else:

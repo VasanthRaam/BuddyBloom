@@ -137,7 +137,7 @@ async def create_leave_request(
     """
     Submit a leave request.
     """
-    from app.db.models import LeaveRequest, Student, Notification, User
+    from app.db.models import LeaveRequest, Student, Notification, User, Enrollment, Batch
     from uuid import UUID
 
     # Get student profile
@@ -160,9 +160,31 @@ async def create_leave_request(
     admin_res = await db.execute(select(User).where(User.role == "admin"))
     admins = admin_res.scalars().all()
     
-    for admin in admins:
+    # Find student's teachers
+    teacher_query = (
+        select(Batch.teacher_id)
+        .join(Enrollment, Enrollment.batch_id == Batch.id)
+        .where(Enrollment.student_id == student.id, Batch.teacher_id.isnot(None))
+    )
+    teacher_res = await db.execute(teacher_query)
+    teacher_ids = list(set([r[0] for r in teacher_res.all()]))
+    
+    teachers = []
+    if teacher_ids:
+        teachers_res = await db.execute(select(User).where(User.id.in_(teacher_ids)))
+        teachers = teachers_res.scalars().all()
+
+    # Combine and deduplicate
+    users_to_notify = list(admins) + list(teachers)
+    notified_ids = set()
+    
+    for u in users_to_notify:
+        if u.id in notified_ids:
+            continue
+        notified_ids.add(u.id)
+        
         db.add(Notification(
-            user_id=admin.id,
+            user_id=u.id,
             title="New Leave Request",
             message=f"{student.first_name} requested leave from {request.start_date} to {request.end_date}.",
             link_to="PendingApprovals"
@@ -170,18 +192,18 @@ async def create_leave_request(
     
     await db.commit()
 
-    # Trigger push notifications for admins
-    for admin in admins:
+    # Trigger push notifications for admins & teachers
+    for user_id in notified_ids:
         try:
             await NotificationService.send_push_notification(
                 db,
-                admin.id,
+                user_id,
                 "New Leave Request 📅",
                 f"{student.first_name} requested leave from {request.start_date} to {request.end_date}.",
                 {"type": "leave_request", "action": "approval", "screen": "PendingApprovals"}
             )
         except Exception as e:
-            print(f"⚠️ [LEAVE] Failed to send push notification to admin {admin.id}: {e}")
+            print(f"⚠️ [LEAVE] Failed to send push notification to user {user_id}: {e}")
     await db.refresh(leave_req)
     return leave_req
 

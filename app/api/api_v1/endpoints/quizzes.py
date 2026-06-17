@@ -151,6 +151,7 @@ async def submit_quiz(
 async def get_all_results(
     quiz_id: Optional[UUID] = None,
     batch_id: Optional[UUID] = None,
+    course_id: Optional[UUID] = None,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
@@ -158,7 +159,7 @@ async def get_all_results(
     Get quiz results (attempts). 
     Everyone can view, but parents are restricted to their kids.
     """
-    attempts = await QuizService.get_attempts(db, current_user["id"], current_user["role"], quiz_id, batch_id)
+    attempts = await QuizService.get_attempts(db, current_user["id"], current_user["role"], quiz_id, batch_id, course_id)
     
     results_formatted = []
     for a in attempts:
@@ -175,7 +176,9 @@ async def get_all_results(
                 student_name=f"{a.student.first_name} {a.student.last_name}",
                 total_score=a.total_score,
                 max_score=m_score,
-                attempted_at=a.attempted_at
+                attempted_at=a.attempted_at,
+                course_id=a.quiz.course_id,
+                course_name=a.quiz.course.name if a.quiz.course else None
             )
         )
     return results_formatted

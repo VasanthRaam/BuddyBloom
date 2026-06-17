@@ -6,7 +6,7 @@ from typing import List, Any
 from uuid import UUID
 
 from app.db.database import get_db
-from app.db.models import User, FeePayment, UserRole, Notification
+from app.db.models import User, FeePayment, UserRole, Notification, Batch
 from app.api.deps import get_current_user
 from app.schemas.fees import FeeCreateBulk, FeeResponse, AdminUPISchema
 
@@ -71,14 +71,18 @@ async def create_fee_reminder(
             except Exception as e:
                 print(f"⚠️ [FEES] Failed to send push notification to user {uid}: {e}")
 
-        # Query created fees back eagerly with selectinload(FeePayment.user)
+        # Query created fees back eagerly with selectinload
         # to avoid lazy loading crashes during response serialization
         if created_fees:
             fee_ids = [f.id for f in created_fees]
             result = await db.execute(
                 select(FeePayment)
                 .where(FeePayment.id.in_(fee_ids))
-                .options(selectinload(FeePayment.user))
+                .options(
+                    selectinload(FeePayment.user),
+                    selectinload(FeePayment.course),
+                    selectinload(FeePayment.batch)
+                )
             )
             return result.scalars().all()
             
@@ -108,11 +112,39 @@ async def get_fees(
         user_uuid = UUID(current_user["id"])
         
         if role == "admin":
-            query = select(FeePayment).options(selectinload(FeePayment.user))
+            query = select(FeePayment).options(
+                selectinload(FeePayment.user),
+                selectinload(FeePayment.course),
+                selectinload(FeePayment.batch)
+            )
             if student_id:
                 query = query.where(FeePayment.user_id == student_id)
         elif role == "student":
-            query = select(FeePayment).options(selectinload(FeePayment.user)).where(FeePayment.user_id == user_uuid)
+            query = (
+                select(FeePayment)
+                .options(
+                    selectinload(FeePayment.user),
+                    selectinload(FeePayment.course),
+                    selectinload(FeePayment.batch)
+                )
+                .where(FeePayment.user_id == user_uuid)
+            )
+        elif role == "teacher":
+            batch_res = await db.execute(
+                select(Batch.id).where(Batch.teacher_id == user_uuid)
+            )
+            teacher_batch_ids = [r[0] for r in batch_res.all()]
+            if not teacher_batch_ids:
+                return []
+            query = (
+                select(FeePayment)
+                .options(
+                    selectinload(FeePayment.user),
+                    selectinload(FeePayment.course),
+                    selectinload(FeePayment.batch)
+                )
+                .where(FeePayment.batch_id.in_(teacher_batch_ids))
+            )
         else:
             # parent or teacher shouldn't see this unless requested, for now restrict or let parent see
             if role == "parent":
@@ -149,7 +181,11 @@ async def mark_fee_received(
         fee_res = await db.execute(
             select(FeePayment)
             .where(FeePayment.id == fee_id)
-            .options(selectinload(FeePayment.user))
+            .options(
+                selectinload(FeePayment.user),
+                selectinload(FeePayment.course),
+                selectinload(FeePayment.batch)
+            )
         )
         fee = fee_res.scalars().first()
         if not fee:

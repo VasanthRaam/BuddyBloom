@@ -565,3 +565,258 @@ async def get_test_token(email: str = "test@example.com"):
     }
     token = jose_jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
     return {"access_token": token, "token_type": "bearer"}
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    otp: str
+    new_password: str
+
+@router.post("/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Generate a 6-digit OTP for password reset.
+    Since there is no email service configured, the OTP is returned in the response for testing.
+    """
+    from sqlalchemy import func
+    from app.db.models import PasswordResetOTP
+    from datetime import datetime, timedelta, timezone
+    import random
+    
+    # 1. Check if user exists
+    user_res = await db.execute(
+        select(User).where(func.lower(User.email) == func.lower(request.email))
+    )
+    db_user = user_res.scalars().first()
+    
+    if not db_user:
+        # We don't want to leak whether an email exists for security reasons,
+        # but for this specific app's requirements, a 404 is helpful to the user.
+        raise HTTPException(status_code=404, detail="Email not found in our records.")
+        
+    # 2. Invalidate previous OTPs
+    await db.execute(
+        PasswordResetOTP.__table__.update()
+        .where(PasswordResetOTP.email == request.email)
+        .where(PasswordResetOTP.is_used == False)
+        .values(is_used=True)
+    )
+    
+    # 3. Generate new 6-digit OTP
+    otp_code = str(random.randint(100000, 999999))
+    expires = datetime.now(timezone.utc) + timedelta(minutes=15)
+    
+    new_otp = PasswordResetOTP(
+        email=request.email,
+        otp=otp_code,
+        expires_at=expires,
+        is_used=False
+    )
+    db.add(new_otp)
+    await db.commit()
+    
+    # 4. Send Email using the SMTP service
+    from app.services.email_service import EmailService
+    import asyncio
+    
+    # We can send the email in the background to not block the response
+    asyncio.create_task(asyncio.to_thread(EmailService.send_otp_email, request.email, otp_code))
+    
+    print(f"[AUTH] FORGOT PASSWORD OTP generated for {request.email}")
+    
+    return {
+        "message": "Reset code generated successfully. Please check your email.",
+    }
+
+@router.post("/reset-password")
+async def reset_password(request: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Verify the OTP and force-update the user's password using Supabase Admin API.
+    """
+    from sqlalchemy import func
+    from app.db.models import PasswordResetOTP
+    from datetime import datetime, timezone
+    from supabase import create_client as _cc
+    
+    # 1. Verify OTP
+    otp_res = await db.execute(
+        select(PasswordResetOTP)
+        .where(func.lower(PasswordResetOTP.email) == func.lower(request.email))
+        .where(PasswordResetOTP.otp == request.otp)
+        .where(PasswordResetOTP.is_used == False)
+    )
+    otp_record = otp_res.scalars().first()
+    
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="Invalid reset code.")
+        
+    if otp_record.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Reset code has expired. Please request a new one.")
+        
+    # 2. Fetch the local user to get their Supabase ID
+    user_res = await db.execute(
+        select(User).where(func.lower(User.email) == func.lower(request.email))
+    )
+    db_user = user_res.scalars().first()
+    
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+        
+    # 3. Update password in Supabase via Admin API
+    if not settings.SUPABASE_SERVICE_KEY:
+        raise HTTPException(status_code=500, detail="Supabase Service Key is not configured. Cannot update password.")
+        
+    admin_client = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+    try:
+        admin_client.auth.admin.update_user_by_id(str(db_user.id), {"password": request.new_password})
+    except Exception as e:
+        print(f"[RESET PASSWORD] Supabase Error: {e}")
+        # Could fail if the user is a Google-only user without an email/password identity setup.
+        raise HTTPException(status_code=400, detail="Could not update password. Ensure you registered with email/password.")
+        
+    # 4. Mark OTP as used
+    otp_record.is_used = True
+    await db.commit()
+    
+    return {"message": "Password has been successfully reset. You can now log in."}
+
+class MobileLoginInitRequest(BaseModel):
+    phone: str
+
+class MobileLoginVerifyRequest(BaseModel):
+    phone: str
+    otp: str
+    selected_profile_id: str | None = None
+
+@router.post("/mobile-login-init")
+async def mobile_login_init(request: MobileLoginInitRequest, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import func
+    from app.db.models import MobileLoginOTP
+    from datetime import datetime, timedelta, timezone
+    import random
+    from app.services.sms_service import SMSService
+
+    # 1. Check if ANY user with this phone exists and is approved
+    user_res = await db.execute(
+        select(User).where(User.phone == request.phone)
+    )
+    db_users = user_res.scalars().all()
+
+    if not db_users:
+        raise HTTPException(status_code=404, detail="Phone number not registered.")
+        
+    approved_users = [u for u in db_users if u.is_approved]
+    if not approved_users:
+        raise HTTPException(status_code=403, detail="Account pending approval.")
+
+    # 2. Invalidate previous OTPs
+    await db.execute(
+        MobileLoginOTP.__table__.update()
+        .where(MobileLoginOTP.phone == request.phone)
+        .where(MobileLoginOTP.is_used == False)
+        .values(is_used=True)
+    )
+    
+    # 3. Generate new 6-digit OTP
+    otp_code = str(random.randint(100000, 999999))
+    expires = datetime.now(timezone.utc) + timedelta(minutes=5)
+    
+    new_otp = MobileLoginOTP(
+        phone=request.phone,
+        otp=otp_code,
+        expires_at=expires,
+        is_used=False
+    )
+    db.add(new_otp)
+    await db.commit()
+    
+    # 4. Send SMS (Mocked via console)
+    SMSService.send_otp(request.phone, otp_code)
+    
+    return {
+        "message": "OTP sent successfully.",
+    }
+
+@router.post("/mobile-login-verify")
+async def mobile_login_verify(request: MobileLoginVerifyRequest, db: AsyncSession = Depends(get_db)):
+    from app.db.models import MobileLoginOTP
+    from datetime import datetime, timezone, timedelta
+    from jose import jwt as jose_jwt
+    
+    # 1. Verify OTP
+    otp_res = await db.execute(
+        select(MobileLoginOTP)
+        .where(MobileLoginOTP.phone == request.phone)
+        .where(MobileLoginOTP.otp == request.otp)
+        .where(MobileLoginOTP.is_used == False)
+    )
+    otp_record = otp_res.scalars().first()
+    
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="Invalid OTP.")
+        
+    if otp_record.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new one.")
+        
+    # 2. Fetch the users
+    user_res = await db.execute(
+        select(User).where(User.phone == request.phone)
+    )
+    db_users = user_res.scalars().all()
+    approved_users = [u for u in db_users if u.is_approved]
+    
+    if not approved_users:
+        raise HTTPException(status_code=404, detail="No approved user found for this phone number.")
+        
+    # 3. Handle multiple profiles if no specific profile is selected
+    if len(approved_users) > 1 and not request.selected_profile_id:
+        return {
+            "type": "multiple_profiles",
+            "profiles": [
+                {
+                    "id": str(u.id),
+                    "full_name": u.full_name,
+                    "email": u.email,
+                    "role": _role_value(u.role)
+                } for u in approved_users
+            ]
+        }
+        
+    # 4. Resolve the specific user to log in
+    if request.selected_profile_id:
+        db_user = next((u for u in approved_users if str(u.id) == request.selected_profile_id), None)
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Selected profile not found or not approved.")
+    else:
+        db_user = approved_users[0]
+        
+    # 5. Generate custom JWT
+    payload = {
+        "sub": str(db_user.id),
+        "role": _role_value(db_user.role),
+        "email": db_user.email,
+        "exp": datetime.now(timezone.utc) + timedelta(days=7) # 7 days expiration
+    }
+    token = jose_jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+    
+    # 6. Mark OTP as used
+    otp_record.is_used = True
+    await db.commit()
+    
+    user_data = {
+        "id": str(db_user.id),
+        "email": db_user.email,
+        "role": _role_value(db_user.role),
+        "full_name": db_user.full_name,
+        "created_at": db_user.created_at.isoformat() if db_user.created_at else None,
+    }
+    
+    return {
+        "type": "login_success",
+        "access_token": token,
+        "token_type": "bearer",
+        "user": user_data,
+    }

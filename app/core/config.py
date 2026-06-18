@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
+    # SMTP Email configuration
+    SMTP_EMAIL: str = ""
+    SMTP_PASSWORD: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()

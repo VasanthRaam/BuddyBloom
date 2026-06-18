@@ -366,3 +366,23 @@ class LeaveRequest(Base):
     
     student = relationship("Student")
     handler = relationship("User")
+
+class PasswordResetOTP(Base):
+    __tablename__ = "password_reset_otps"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String, nullable=False)
+    otp = Column(String(6), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    is_used = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class MobileLoginOTP(Base):
+    __tablename__ = "mobile_login_otps"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    phone = Column(String, nullable=False)
+    otp = Column(String(6), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    is_used = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

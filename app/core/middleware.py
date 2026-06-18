@@ -19,6 +19,10 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/auth/courses-batches",
             "/api/v1/auth/test-token",
             "/api/v1/auth/google-sync",
+            "/api/v1/auth/forgot-password",
+            "/api/v1/auth/reset-password",
+            "/api/v1/auth/mobile-login-init",
+            "/api/v1/auth/mobile-login-verify",
         ]
 
     async def dispatch(self, request: Request, call_next):

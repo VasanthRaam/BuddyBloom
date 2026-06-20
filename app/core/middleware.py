@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from jose import jwt, JWTError
 from app.core.config import settings
+import time
 
 class SupabaseAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, exclude_paths: list[str] = None):
@@ -23,6 +24,7 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/auth/reset-password",
             "/api/v1/auth/mobile-login-init",
             "/api/v1/auth/mobile-login-verify",
+            "/api/v1/diagnostics/ping",
         ]
 
     async def dispatch(self, request: Request, call_next):
@@ -78,4 +80,20 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+        return response
+
+
+class ResponseTimingMiddleware(BaseHTTPMiddleware):
+    """
+    Measures server-side processing time for every request and injects it
+    as the X-Response-Time header (in milliseconds). Use this from the
+    frontend to separate network latency from server processing time:
+
+        network_ms = total_round_trip_ms - parseInt(response.headers['x-response-time'])
+    """
+    async def dispatch(self, request: Request, call_next):
+        t0 = time.monotonic()
+        response = await call_next(request)
+        elapsed_ms = round((time.monotonic() - t0) * 1000, 2)
+        response.headers["X-Response-Time"] = f"{elapsed_ms}ms"
         return response

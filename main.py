@@ -24,11 +24,12 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-from app.core.middleware import SupabaseAuthMiddleware, NoCacheMiddleware
+from app.core.middleware import SupabaseAuthMiddleware, NoCacheMiddleware, ResponseTimingMiddleware
 
 # Add JWT Authentication and No-Cache Middleware
 app.add_middleware(SupabaseAuthMiddleware)
 app.add_middleware(NoCacheMiddleware)
+app.add_middleware(ResponseTimingMiddleware)
 
 # Set all CORS enabled origins
 # Must be added LAST so it's the outermost middleware!

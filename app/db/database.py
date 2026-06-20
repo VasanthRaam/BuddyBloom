@@ -5,8 +5,11 @@ from app.core.config import settings
 print(f"DEBUG: Connecting to database at {settings.DATABASE_URL.split('@')[-1]}")
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=True,
+    echo=False,          # Disabled: was printing every SQL statement (adds I/O overhead)
     future=True,
+    pool_pre_ping=True,  # Detect & discard stale connections before use
+    pool_size=5,
+    max_overflow=10,
     connect_args={"statement_cache_size": 0}
 )
 

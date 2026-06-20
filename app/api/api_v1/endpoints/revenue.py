@@ -7,9 +7,9 @@ from collections import defaultdict
 import datetime
 
 from app.db.database import get_db
-from app.db.models import User, FeePayment, UserRole, Expense, Student, Enrollment, Batch, Course
+from app.db.models import User, FeePayment, UserRole, Expense, Income, Student, Enrollment, Batch, Course
 from app.api.deps import get_current_user
-from app.schemas.revenue import ExpenseCreate, ExpenseResponse, RevenueDashboardData
+from app.schemas.revenue import ExpenseCreate, ExpenseResponse, IncomeCreate, IncomeResponse, RevenueDashboardData
 
 router = APIRouter()
 
@@ -52,6 +52,45 @@ async def get_expenses(
     result = await db.execute(select(Expense).order_by(Expense.expense_date.desc()))
     return result.scalars().all()
 
+@router.post("/incomes", response_model=IncomeResponse)
+async def create_income(
+    *,
+    db: AsyncSession = Depends(get_db),
+    income_in: IncomeCreate,
+    current_user: dict = Depends(get_current_user)
+) -> Any:
+    """
+    Create a new manual income. Admin only.
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    income = Income(
+        amount=income_in.amount,
+        category=income_in.category,
+        description=income_in.description,
+        income_date=income_in.income_date,
+        created_by=UUID(current_user["id"])
+    )
+    db.add(income)
+    await db.commit()
+    await db.refresh(income)
+    return income
+
+@router.get("/incomes", response_model=List[IncomeResponse])
+async def get_incomes(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+) -> Any:
+    """
+    Get all manual incomes. Admin only.
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    result = await db.execute(select(Income).order_by(Income.income_date.desc()))
+    return result.scalars().all()
+
 @router.get("/dashboard", response_model=RevenueDashboardData)
 async def get_revenue_dashboard(
     db: AsyncSession = Depends(get_db),
@@ -64,9 +103,14 @@ async def get_revenue_dashboard(
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
     # Fetch Income
+    # Fetch Income (Fees + Manual Incomes)
     paid_fees_res = await db.execute(select(FeePayment).where(FeePayment.status == 'paid'))
     paid_fees = paid_fees_res.scalars().all()
-    total_income = sum(fee.amount for fee in paid_fees)
+    
+    incomes_res = await db.execute(select(Income))
+    manual_incomes = incomes_res.scalars().all()
+    
+    total_income = sum(fee.amount for fee in paid_fees) + sum(inc.amount for inc in manual_incomes)
 
     # Fetch Expenses
     expenses_res = await db.execute(select(Expense))
@@ -82,6 +126,11 @@ async def get_revenue_dashboard(
         if fee.paid_at:
             month_key = fee.paid_at.strftime("%Y-%m")
             monthly_dict[month_key]["income"] += fee.amount
+
+    for inc in manual_incomes:
+        if inc.income_date:
+            month_key = inc.income_date.strftime("%Y-%m")
+            monthly_dict[month_key]["income"] += inc.amount
 
     for exp in expenses:
         if exp.expense_date:
@@ -147,6 +196,11 @@ async def get_revenue_dashboard(
                 course = course_res.scalars().first()
                 if course:
                     course_dict[course.name] += split_amount
+
+    # Add manual incomes to the breakdown
+    for inc in manual_incomes:
+        course_dict["Manual Income"] += inc.amount
+        batch_dict[inc.category] += inc.amount # Use category as 'batch' or sub-breakdown for manual incomes
 
     # Convert to BreakdownItem format
     course_breakdown = []

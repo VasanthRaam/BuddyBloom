@@ -305,6 +305,17 @@ class Expense(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+class Income(Base):
+    __tablename__ = "incomes"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amount = Column(Float, nullable=False)
+    category = Column(String, nullable=False) # e.g. Event, Course Fee, Donation, Other
+    description = Column(String)
+    income_date = Column(Date, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
 class AcademyHoliday(Base):
     __tablename__ = "academy_holidays"
     

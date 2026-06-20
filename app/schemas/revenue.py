@@ -21,6 +21,24 @@ class ExpenseResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class IncomeCreate(BaseModel):
+    amount: float
+    category: str
+    description: Optional[str] = None
+    income_date: date
+
+class IncomeResponse(BaseModel):
+    id: UUID
+    amount: float
+    category: str
+    description: Optional[str]
+    income_date: date
+    created_at: datetime
+    created_by: Optional[UUID]
+
+    class Config:
+        from_attributes = True
+
 class MonthlyData(BaseModel):
     month: str
     income: float

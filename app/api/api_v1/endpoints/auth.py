@@ -820,3 +820,116 @@ async def mobile_login_verify(request: MobileLoginVerifyRequest, db: AsyncSessio
         "token_type": "bearer",
         "user": user_data,
     }
+
+# --- Firebase OTP Login Integration ---
+
+class FirebaseLoginVerifyRequest(BaseModel):
+    id_token: str
+    selected_profile_id: str | None = None
+
+async def verify_firebase_token(id_token: str, project_id: str) -> str:
+    import httpx
+    from jose import jwt as jose_jwt
+    
+    url = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+    async with httpx.AsyncClient() as client:
+        res = await client.get(url)
+        if res.status_code != 200:
+            raise HTTPException(status_code=500, detail="Failed to fetch Google public keys.")
+        public_keys = res.json()
+
+    try:
+        unverified_header = jose_jwt.get_unverified_header(id_token)
+        kid = unverified_header.get("kid")
+        if not kid or kid not in public_keys:
+            raise HTTPException(status_code=400, detail="Invalid token header (kid not found or invalid).")
+
+        public_key_pem = public_keys[kid]
+        
+        claims = jose_jwt.decode(
+            id_token,
+            public_key_pem,
+            algorithms=["RS256"],
+            audience=project_id,
+            issuer=f"https://securetoken.google.com/{project_id}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid Firebase token: {str(e)}")
+
+    phone_number = claims.get("phone_number")
+    if not phone_number:
+        raise HTTPException(status_code=400, detail="Firebase token does not contain a verified phone number.")
+
+    return phone_number
+
+@router.post("/firebase-login-verify")
+async def firebase_login_verify(request: FirebaseLoginVerifyRequest, db: AsyncSession = Depends(get_db)):
+    from app.db.models import User
+    from jose import jwt as jose_jwt
+    from datetime import datetime, timezone, timedelta
+    
+    firebase_project_id = settings.FIREBASE_PROJECT_ID or "buddybloom-app"
+    phone = await verify_firebase_token(request.id_token, firebase_project_id)
+    
+    user_res = await db.execute(
+        select(User).where(User.phone == phone)
+    )
+    db_users = user_res.scalars().all()
+    
+    # Try local matching if phone has country code (e.g. +91)
+    if not db_users and len(phone) > 10:
+        local_phone = phone[-10:]
+        user_res = await db.execute(
+            select(User).where(User.phone == local_phone)
+        )
+        db_users = user_res.scalars().all()
+        
+    if not db_users:
+        raise HTTPException(status_code=404, detail="Phone number not registered.")
+        
+    approved_users = [u for u in db_users if u.is_approved]
+    if not approved_users:
+        raise HTTPException(status_code=403, detail="Account pending approval.")
+        
+    if len(approved_users) > 1 and not request.selected_profile_id:
+        return {
+            "type": "multiple_profiles",
+            "profiles": [
+                {
+                    "id": str(u.id),
+                    "full_name": u.full_name,
+                    "email": u.email,
+                    "role": _role_value(u.role)
+                } for u in approved_users
+            ]
+        }
+        
+    if request.selected_profile_id:
+        db_user = next((u for u in approved_users if str(u.id) == request.selected_profile_id), None)
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Selected profile not found or not approved.")
+    else:
+        db_user = approved_users[0]
+        
+    payload = {
+        "sub": str(db_user.id),
+        "role": _role_value(db_user.role),
+        "email": db_user.email,
+        "exp": datetime.now(timezone.utc) + timedelta(days=7)
+    }
+    token = jose_jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+    
+    user_data = {
+        "id": str(db_user.id),
+        "email": db_user.email,
+        "role": _role_value(db_user.role),
+        "full_name": db_user.full_name,
+        "created_at": db_user.created_at.isoformat() if db_user.created_at else None,
+    }
+    
+    return {
+        "type": "login_success",
+        "access_token": token,
+        "token_type": "bearer",
+        "user": user_data,
+    }

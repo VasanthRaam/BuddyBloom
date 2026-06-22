@@ -24,6 +24,7 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/auth/reset-password",
             "/api/v1/auth/mobile-login-init",
             "/api/v1/auth/mobile-login-verify",
+            "/api/v1/auth/firebase-login-verify",
             "/api/v1/diagnostics/ping",
         ]
 

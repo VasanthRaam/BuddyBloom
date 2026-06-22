@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str = ""  # Optional: service_role key for admin user creation
     SUPABASE_JWT_SECRET: str
 
+    # Firebase Settings
+    FIREBASE_PROJECT_ID: str = "buddybloom-app"
+
     # Gemini API
     GEMINI_API_KEY: str = ""
 

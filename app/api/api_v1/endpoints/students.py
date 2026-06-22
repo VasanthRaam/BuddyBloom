@@ -21,8 +21,51 @@ async def read_students(
     """
     Retrieve students. Requires Authentication.
     """
-    students = await StudentService.get_students(db, skip=skip, limit=limit)
-    return students
+    from sqlalchemy.orm import selectinload
+    from app.db.models import Student, Enrollment, Batch, Course
+    
+    result = await db.execute(
+        select(Student)
+        .options(
+            selectinload(Student.user),
+            selectinload(Student.parent),
+            selectinload(Student.enrollments).selectinload(Enrollment.batch).selectinload(Batch.course)
+        )
+        .offset(skip)
+        .limit(limit)
+    )
+    students = result.scalars().all()
+    
+    response_data = []
+    for s in students:
+        # Resolve registered course names from student enrollments
+        courses_list = []
+        for e in s.enrollments:
+            if e.batch and e.batch.course:
+                courses_list.append(e.batch.course.name)
+        
+        # Deduplicate courses
+        courses_list = list(set(courses_list))
+        
+        # Get email and phone from student's own user record or fall back to parent's
+        email = s.user.email if s.user else (s.parent.email if s.parent else None)
+        phone = s.user.phone if s.user else (s.parent.phone if s.parent else None)
+        
+        response_data.append({
+            "id": s.id,
+            "first_name": s.first_name,
+            "last_name": s.last_name,
+            "date_of_birth": s.date_of_birth,
+            "parent_id": s.parent_id,
+            "user_id": s.user_id,
+            "created_at": s.created_at,
+            "updated_at": s.updated_at,
+            "email": email,
+            "phone": phone,
+            "courses": courses_list
+        })
+        
+    return response_data
 
 @router.post("/", response_model=StudentResponse)
 async def create_student(

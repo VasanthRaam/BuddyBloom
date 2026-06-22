@@ -22,5 +22,8 @@ class StudentResponse(StudentBase):
     user_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    courses: list[str] = []
 
     model_config = ConfigDict(from_attributes=True)

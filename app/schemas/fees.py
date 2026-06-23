@@ -43,6 +43,7 @@ class FeeResponse(BaseModel):
     user: Optional[UserResponse] = None
     course: Optional[CourseMinResponse] = None
     batch: Optional[BatchMinResponse] = None
+    is_manual: bool = False
 
     class Config:
         from_attributes = True

@@ -65,12 +65,63 @@ async def create_income(
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
+    if income_in.category == "Course Fee":
+        if not income_in.student_id:
+            raise HTTPException(status_code=400, detail="student_id is required for Course Fee category")
+        
+        # Resolve student profile
+        student_res = await db.execute(
+            select(Student).where(Student.user_id == income_in.student_id)
+        )
+        student = student_res.scalars().first()
+        if not student:
+            student_res = await db.execute(
+                select(Student).where(Student.id == income_in.student_id)
+            )
+            student = student_res.scalars().first()
+
+        if not student:
+            raise HTTPException(status_code=404, detail="Student profile not found")
+
+        # Resolve active enrollment
+        enr_res = await db.execute(
+            select(Enrollment).where(Enrollment.student_id == student.id).limit(1)
+        )
+        enrollment = enr_res.scalars().first()
+        course_id = None
+        batch_id = None
+        if enrollment:
+            batch_id = enrollment.batch_id
+            batch_res = await db.execute(select(Batch).where(Batch.id == batch_id))
+            batch = batch_res.scalars().first()
+            if batch:
+                course_id = batch.course_id
+
+        # Parse income_date to datetime with timezone for FeePayment
+        paid_datetime = datetime.datetime.combine(income_in.income_date, datetime.time.min).replace(tzinfo=datetime.timezone.utc)
+
+        # Create FeePayment
+        import uuid
+        fee = FeePayment(
+            id=uuid.uuid4(),
+            user_id=student.user_id,
+            amount=income_in.amount,
+            status="paid",
+            due_date=paid_datetime,
+            paid_at=paid_datetime,
+            course_id=course_id,
+            batch_id=batch_id,
+            is_manual=True
+        )
+        db.add(fee)
+
     income = Income(
         amount=income_in.amount,
         category=income_in.category,
         description=income_in.description,
         income_date=income_in.income_date,
-        created_by=UUID(current_user["id"])
+        created_by=UUID(current_user["id"]),
+        student_id=income_in.student_id
     )
     db.add(income)
     await db.commit()
@@ -88,7 +139,11 @@ async def get_incomes(
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
-    result = await db.execute(select(Income).order_by(Income.income_date.desc()))
+    result = await db.execute(
+        select(Income)
+        .where(Income.category != "Course Fee")
+        .order_by(Income.income_date.desc())
+    )
     return result.scalars().all()
 
 @router.get("/dashboard", response_model=RevenueDashboardData)
@@ -112,7 +167,9 @@ async def get_revenue_dashboard(
     )
     paid_fees_total = paid_sum_res.scalar() or 0.0
 
-    manual_sum_res = await db.execute(select(func.sum(Income.amount)))
+    manual_sum_res = await db.execute(
+        select(func.sum(Income.amount)).where(Income.category != "Course Fee")
+    )
     manual_incomes_total = manual_sum_res.scalar() or 0.0
 
     total_income = paid_fees_total + manual_incomes_total
@@ -138,7 +195,7 @@ async def get_revenue_dashboard(
             func.to_char(Income.income_date, "YYYY-MM").label("month"),
             func.sum(Income.amount).label("total"),
         )
-        .where(Income.income_date.isnot(None))
+        .where(Income.income_date.isnot(None), Income.category != "Course Fee")
         .group_by("month")
     )
     income_monthly = {row.month: row.total for row in income_monthly_res}
@@ -230,7 +287,9 @@ async def get_revenue_dashboard(
 
     # Manual incomes → attribute to "Manual Income" bucket
     manual_by_cat_res = await db.execute(
-        select(Income.category, func.sum(Income.amount).label("total")).group_by(Income.category)
+        select(Income.category, func.sum(Income.amount).label("total"))
+        .where(Income.category != "Course Fee")
+        .group_by(Income.category)
     )
     for row in manual_by_cat_res:
         course_dict["Manual Income"] += row.total

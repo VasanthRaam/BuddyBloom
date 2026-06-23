@@ -216,6 +216,7 @@ class FeePayment(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
     batch_id = Column(UUID(as_uuid=True), ForeignKey("batches.id", ondelete="SET NULL"), nullable=True)
+    is_manual = Column(Boolean, default=False, server_default="false", nullable=False)
 
     user = relationship("User", back_populates="fee_payments")
     course = relationship("Course")
@@ -315,6 +316,7 @@ class Income(Base):
     income_date = Column(Date, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    student_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 class AcademyHoliday(Base):
     __tablename__ = "academy_holidays"

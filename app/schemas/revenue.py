@@ -26,6 +26,7 @@ class IncomeCreate(BaseModel):
     category: str
     description: Optional[str] = None
     income_date: date
+    student_id: Optional[UUID] = None
 
 class IncomeResponse(BaseModel):
     id: UUID
@@ -35,6 +36,7 @@ class IncomeResponse(BaseModel):
     income_date: date
     created_at: datetime
     created_by: Optional[UUID]
+    student_id: Optional[UUID] = None
 
     class Config:
         from_attributes = True

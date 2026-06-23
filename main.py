@@ -67,6 +67,10 @@ async def startup_event():
             # Ensure course_id and batch_id columns exist on fee_payments table
             await conn.execute(text("ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS course_id UUID;"))
             await conn.execute(text("ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS batch_id UUID;"))
+            # Ensure is_manual column exists on fee_payments table
+            await conn.execute(text("ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS is_manual BOOLEAN NOT NULL DEFAULT FALSE;"))
+            # Ensure student_id column exists on incomes table
+            await conn.execute(text("ALTER TABLE incomes ADD COLUMN IF NOT EXISTS student_id UUID;"))
             print("Successfully ran startup database migrations!")
     except Exception as e:
         print(f"Error during startup database migrations: {e}")

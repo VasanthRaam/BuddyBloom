@@ -298,3 +298,67 @@ async def update_admin_upi(
                 "traceback": traceback.format_exc()
             }
         )
+
+@router.post("/{fee_id}/remind")
+async def send_fee_reminder(
+    *,
+    db: AsyncSession = Depends(get_db),
+    fee_id: UUID,
+    current_user: dict = Depends(get_current_user)
+) -> Any:
+    """
+    Send a push notification and database notification reminder for a pending fee. Admin only.
+    """
+    try:
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Not enough permissions")
+
+        fee_res = await db.execute(
+            select(FeePayment)
+            .where(FeePayment.id == fee_id)
+            .options(
+                selectinload(FeePayment.user),
+                selectinload(FeePayment.course),
+                selectinload(FeePayment.batch)
+            )
+        )
+        fee = fee_res.scalars().first()
+        if not fee:
+            raise HTTPException(status_code=404, detail="Fee payment not found")
+
+        if fee.status == "paid":
+            raise HTTPException(status_code=400, detail="Fee has already been paid")
+
+        # Create database notification
+        notif = Notification(
+            user_id=fee.user_id,
+            title="Fee Pending Reminder",
+            message=f"Friendly reminder: You have a pending fee of ₹{fee.amount} due by {fee.due_date.strftime('%Y-%m-%d') if fee.due_date else 'N/A'}.",
+            link_to="Fees"
+        )
+        db.add(notif)
+        await db.commit()
+
+        # Send push notification
+        from app.services.notification_service import NotificationService
+        try:
+            await NotificationService.send_push_notification(
+                db,
+                fee.user_id,
+                "Pending Fee Reminder 💳",
+                f"Friendly reminder: You have a pending fee of ₹{fee.amount} due by {fee.due_date.strftime('%Y-%m-%d') if fee.due_date else 'N/A'}.",
+                {"type": "fee", "screen": "Fees"}
+            )
+        except Exception as e:
+            print(f"⚠️ [FEES] Failed to send push notification to user {fee.user_id}: {e}")
+
+        return {"status": "success", "message": "Reminder sent successfully"}
+    except Exception as e:
+        import traceback
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+        )

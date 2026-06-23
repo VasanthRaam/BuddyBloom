@@ -197,7 +197,7 @@ class QuizService:
         query = select(QuizAttempt).options(
             selectinload(QuizAttempt.quiz).selectinload(Quiz.questions), 
             selectinload(QuizAttempt.quiz).selectinload(Quiz.course), 
-            selectinload(QuizAttempt.student)
+            selectinload(QuizAttempt.student).selectinload(Student.enrollments).selectinload(Enrollment.batch)
         )
         
         if quiz_id:

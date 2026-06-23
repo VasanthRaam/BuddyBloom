@@ -329,6 +329,17 @@ async def send_fee_reminder(
         if fee.status == "paid":
             raise HTTPException(status_code=400, detail="Fee has already been paid")
 
+        # Check if the user is a student and find their parent
+        from app.db.models import Student
+        parent_id = None
+        if fee.user and fee.user.role == "student":
+            student_res = await db.execute(
+                select(Student).where(Student.user_id == fee.user_id)
+            )
+            student = student_res.scalars().first()
+            if student:
+                parent_id = student.parent_id
+
         # Create database notification
         notif = Notification(
             user_id=fee.user_id,
@@ -337,6 +348,16 @@ async def send_fee_reminder(
             link_to="Fees"
         )
         db.add(notif)
+
+        if parent_id:
+            parent_notif = Notification(
+                user_id=parent_id,
+                title="Fee Pending Reminder",
+                message=f"Friendly reminder: Your child has a pending fee of ₹{fee.amount} due by {fee.due_date.strftime('%Y-%m-%d') if fee.due_date else 'N/A'}.",
+                link_to="Fees"
+            )
+            db.add(parent_notif)
+
         await db.commit()
 
         # Send push notification
@@ -349,8 +370,16 @@ async def send_fee_reminder(
                 f"Friendly reminder: You have a pending fee of ₹{fee.amount} due by {fee.due_date.strftime('%Y-%m-%d') if fee.due_date else 'N/A'}.",
                 {"type": "fee", "screen": "Fees"}
             )
+            if parent_id:
+                await NotificationService.send_push_notification(
+                    db,
+                    parent_id,
+                    "Pending Fee Reminder 💳",
+                    f"Friendly reminder: Your child has a pending fee of ₹{fee.amount} due by {fee.due_date.strftime('%Y-%m-%d') if fee.due_date else 'N/A'}.",
+                    {"type": "fee", "screen": "Fees"}
+                )
         except Exception as e:
-            print(f"⚠️ [FEES] Failed to send push notification to user {fee.user_id}: {e}")
+            print(f"⚠️ [FEES] Failed to send push notification: {e}")
 
         return {"status": "success", "message": "Reminder sent successfully"}
     except Exception as e:

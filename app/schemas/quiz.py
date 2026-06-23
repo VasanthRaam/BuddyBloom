@@ -94,6 +94,8 @@ class QuizAttemptListResponse(BaseModel):
     attempted_at: datetime
     course_id: Optional[UUID] = None
     course_name: Optional[str] = None
+    batch_id: Optional[UUID] = None
+    batch_name: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
 

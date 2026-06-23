@@ -167,6 +167,15 @@ async def get_all_results(
         if not m_score or m_score == 0:
             m_score = sum(q.points for q in a.quiz.questions)
             
+        b_id = None
+        b_name = None
+        if a.student and a.student.enrollments:
+            for enrollment in a.student.enrollments:
+                if enrollment.batch and enrollment.batch.course_id == a.quiz.course_id:
+                    b_id = enrollment.batch_id
+                    b_name = enrollment.batch.name
+                    break
+
         results_formatted.append(
             QuizAttemptListResponse(
                 id=a.id,
@@ -178,7 +187,9 @@ async def get_all_results(
                 max_score=m_score,
                 attempted_at=a.attempted_at,
                 course_id=a.quiz.course_id,
-                course_name=a.quiz.course.name if a.quiz.course else None
+                course_name=a.quiz.course.name if a.quiz.course else None,
+                batch_id=b_id,
+                batch_name=b_name
             )
         )
     return results_formatted

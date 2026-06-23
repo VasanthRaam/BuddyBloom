@@ -65,6 +65,7 @@ async def create_income(
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
+    student = None
     if income_in.category == "Course Fee":
         if not income_in.student_id:
             raise HTTPException(status_code=400, detail="student_id is required for Course Fee category")
@@ -115,6 +116,16 @@ async def create_income(
         )
         db.add(fee)
 
+        # Create In-App Notification for Student
+        from app.db.models import Notification
+        notif = Notification(
+            user_id=student.user_id,
+            title="Fee Payment Received",
+            message=f"Your fee payment of ₹{income_in.amount} has been successfully received and verified.",
+            link_to="Fees"
+        )
+        db.add(notif)
+
     income = Income(
         amount=income_in.amount,
         category=income_in.category,
@@ -126,6 +137,21 @@ async def create_income(
     db.add(income)
     await db.commit()
     await db.refresh(income)
+
+    # Trigger real-time push notification for student
+    if income_in.category == "Course Fee" and student:
+        from app.services.notification_service import NotificationService
+        try:
+            await NotificationService.send_push_notification(
+                db,
+                student.user_id,
+                "Fee Payment Received ✅",
+                f"Your fee payment of ₹{income_in.amount} has been successfully received and verified.",
+                {"type": "fee_payment", "screen": "Fees"}
+            )
+        except Exception as e:
+            print(f"⚠️ [REVENUE] Failed to send push notification to user {student.user_id}: {e}")
+
     return income
 
 @router.get("/incomes", response_model=List[IncomeResponse])

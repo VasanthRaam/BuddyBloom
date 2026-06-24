@@ -212,15 +212,22 @@ class QuizService:
             
         if role == UserRole.admin:
             if batch_id:
+                if not quiz_joined:
+                    query = query.join(Quiz)
+                    quiz_joined = True
                 query = query.join(Student).join(Enrollment).where(Enrollment.batch_id == batch_id)
+                query = query.join(Batch, Batch.id == batch_id).where(Quiz.course_id == Batch.course_id)
         elif role == UserRole.teacher:
             # Attempts for quizzes they created or courses they teach
             if not quiz_joined:
                 query = query.join(Quiz)
-            query = query.join(Course).join(Batch, isouter=True)
+                quiz_joined = True
+            
             if batch_id:
-                query = query.where(Batch.id == batch_id)
+                query = query.join(Student).join(Enrollment).where(Enrollment.batch_id == batch_id)
+                query = query.join(Batch, Batch.id == batch_id).where(Quiz.course_id == Batch.course_id)
             else:
+                query = query.join(Course).join(Batch, isouter=True)
                 query = query.where(
                     or_(
                         Quiz.created_by == user_id,
@@ -236,3 +243,4 @@ class QuizService:
             
         result = await db.execute(query)
         return result.scalars().all()
+

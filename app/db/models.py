@@ -18,7 +18,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     role = Column(Enum(UserRole, name="user_role"), nullable=False)
     full_name = Column(String, nullable=False)
-    email = Column(String, unique=True, nullable=False)
+    email = Column(String, nullable=False)
     phone = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -44,7 +44,7 @@ class PendingRegistration(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     full_name = Column(String, nullable=False)
-    email = Column(String, unique=True, nullable=False)
+    email = Column(String, nullable=False)
     phone = Column(String, nullable=True)
     # We store the raw password temporarily so the admin can create the Supabase
     # Auth account on approval. This record is deleted immediately after approval.

@@ -36,6 +36,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    selected_profile_id: str | None = None
 
 class ApproveRequest(BaseModel):
     pass  # No body needed
@@ -47,6 +48,7 @@ class GoogleSyncRequest(BaseModel):
     access_token: str
     email: EmailStr
     full_name: str
+    selected_profile_id: str | None = None
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -193,24 +195,27 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
     except ValueError:
         supabase_uuid = None
 
-    # 2. Fetch local profile — try by Supabase ID first, then fall back to email
-    db_user = None
+    # 2. Fetch local profiles — try by Supabase ID first, then fall back to email
+    approved_users = []
     if supabase_uuid:
         result = await db.execute(select(User).where(User.id == supabase_uuid))
-        db_user = result.scalars().first()
+        users_list = result.scalars().all()
+        approved_users.extend([u for u in users_list if u.is_approved])
 
-    if not db_user:
-        from sqlalchemy import func
-        result = await db.execute(
-            select(User).where(func.lower(User.email) == func.lower(email))
-        )
-        db_user = result.scalars().first()
+    from sqlalchemy import func
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == func.lower(email))
+    )
+    users_by_email = result.scalars().all()
+    for u in users_by_email:
+        if u.is_approved and u not in approved_users:
+            approved_users.append(u)
 
     # 3. Edge-case: the user exists in Supabase Auth but NOT in our DB
-    if not db_user:
+    if not approved_users:
         # Check if they have a pending registration
         pend_res = await db.execute(
-            select(PendingRegistration).where(PendingRegistration.email == email)
+            select(PendingRegistration).where(func.lower(PendingRegistration.email) == func.lower(email))
         )
         pending = pend_res.scalars().first()
         if pending and pending.status == "pending":
@@ -225,12 +230,27 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
             )
         raise HTTPException(status_code=404, detail="User profile not found. Please contact the admin.")
 
-    # 4. Check approval status
-    if not db_user.is_approved:
-        raise HTTPException(
-            status_code=403,
-            detail="Your account is pending admin approval. You will be notified once approved."
-        )
+    # 4. Handle multiple profiles if no specific profile is selected
+    if len(approved_users) > 1 and not request.selected_profile_id:
+        return {
+            "type": "multiple_profiles",
+            "profiles": [
+                {
+                    "id": str(u.id),
+                    "full_name": u.full_name,
+                    "email": u.email,
+                    "role": _role_value(u.role)
+                } for u in approved_users
+            ]
+        }
+
+    # Resolve specific user
+    if request.selected_profile_id:
+        db_user = next((u for u in approved_users if str(u.id) == request.selected_profile_id), None)
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Selected profile not found or not approved.")
+    else:
+        db_user = approved_users[0]
 
     user_data = {
         "id": str(db_user.id),
@@ -255,16 +275,17 @@ async def google_sync(request: GoogleSyncRequest, db: AsyncSession = Depends(get
     from sqlalchemy import func
     print(f"[GOOGLE-SYNC] Syncing user email: {request.email}")
     
-    # 1. Fetch local profile by email (case-insensitive)
+    # 1. Fetch local profiles by email (case-insensitive)
     result = await db.execute(
         select(User).where(func.lower(User.email) == func.lower(request.email))
     )
-    db_user = result.scalars().first()
+    db_users = result.scalars().all()
+    approved_users = [u for u in db_users if u.is_approved]
 
-    if not db_user:
+    if not approved_users:
         # Check if they have a pending registration
         pend_res = await db.execute(
-            select(PendingRegistration).where(PendingRegistration.email == request.email)
+            select(PendingRegistration).where(func.lower(PendingRegistration.email) == func.lower(request.email))
         )
         pending = pend_res.scalars().first()
         if pending:
@@ -276,14 +297,31 @@ async def google_sync(request: GoogleSyncRequest, db: AsyncSession = Depends(get
         # Truly not found -> Trigger registration flow on mobile
         raise HTTPException(status_code=404, detail="Profile not found. Please complete registration.")
 
-    # 2. Check approval status
-    if not db_user.is_approved:
-        raise HTTPException(
-            status_code=403,
-            detail="Your account is pending admin approval."
-        )
+    # Handle multiple profiles if no specific profile is selected
+    if len(approved_users) > 1 and not request.selected_profile_id:
+        return {
+            "type": "multiple_profiles",
+            "profiles": [
+                {
+                    "id": str(u.id),
+                    "full_name": u.full_name,
+                    "email": u.email,
+                    "role": _role_value(u.role)
+                } for u in approved_users
+            ]
+        }
+
+    # Resolve specific user
+    if request.selected_profile_id:
+        db_user = next((u for u in approved_users if str(u.id) == request.selected_profile_id), None)
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Selected profile not found or not approved.")
+    else:
+        db_user = approved_users[0]
 
     return {
+        "type": "login_success",
+        "access_token": request.access_token,
         "user": {
             "id": str(db_user.id),
             "email": db_user.email,

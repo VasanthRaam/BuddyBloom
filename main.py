@@ -62,6 +62,9 @@ async def startup_event():
         async with engine.begin() as conn:
             # Create any missing tables (like user_push_tokens, expenses, etc.)
             await conn.run_sync(Base.metadata.create_all)
+            # Ensure unique constraints on email are dropped to allow multiple users per email
+            await conn.execute(text("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;"))
+            await conn.execute(text("ALTER TABLE pending_registrations DROP CONSTRAINT IF EXISTS pending_registrations_email_key;"))
             # Ensure new columns exist on pending_registrations table
             await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS push_token VARCHAR;"))
             await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS selected_course_ids UUID[];"))

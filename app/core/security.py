@@ -2,6 +2,7 @@ from jose import jwt, JWTError
 from fastapi import HTTPException, status
 import httpx
 from app.core.config import settings
+from datetime import datetime, timezone, timedelta
 
 # Cache for the Supabase public key
 _public_key = None
@@ -29,11 +30,11 @@ async def verify_token(token: str) -> dict:
 
         if alg == "HS256":
             # Standard symmetric verification
-            return jwt.decode(
+            payload = jwt.decode(
                 token,
                 settings.SUPABASE_JWT_SECRET,
                 algorithms=["HS256"],
-                options={"verify_aud": False}
+                options={"verify_aud": False, "verify_exp": False}
             )
         else:
             # Asymmetric verification (ES256 / RS256) using Public Key
@@ -41,12 +42,21 @@ async def verify_token(token: str) -> dict:
             if not jwks:
                 raise JWTError("Could not fetch public key")
                 
-            return jwt.decode(
+            payload = jwt.decode(
                 token,
                 jwks,
                 algorithms=[alg],
-                options={"verify_aud": False}
+                options={"verify_aud": False, "verify_exp": False}
             )
+            
+        # Custom expiration check: extend token validity by 30 days
+        exp = payload.get("exp")
+        if exp:
+            exp_date = datetime.fromtimestamp(exp, tz=timezone.utc)
+            if datetime.now(timezone.utc) > exp_date + timedelta(days=30):
+                raise JWTError("Signature has expired beyond the extended 30-day allowance.")
+                
+        return payload
             
     except JWTError as e:
         raise HTTPException(

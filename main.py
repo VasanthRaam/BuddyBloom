@@ -36,6 +36,8 @@ app.add_middleware(ResponseTimingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
         "http://localhost:8081",
         "http://localhost:19006",
         "http://localhost:19000",

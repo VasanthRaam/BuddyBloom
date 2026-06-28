@@ -83,3 +83,20 @@ async def create_enquiry(
         "message": "Enquiry submitted successfully.",
         "lead_id": str(lead.id)
     }
+
+@router.get("/")
+async def get_all_enquiries(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Lead).order_by(Lead.created_at.desc()))
+    leads = result.scalars().all()
+    return [
+        {
+            "id": str(l.id),
+            "firstName": l.first_name,
+            "lastName": l.last_name,
+            "phone": l.phone,
+            "course": l.course,
+            "batch": l.batch,
+            "message": l.message,
+            "created_at": l.created_at.isoformat() if l.created_at else None
+        } for l in leads
+    ]

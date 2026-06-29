@@ -62,7 +62,12 @@ async def read_students(
             "updated_at": s.updated_at,
             "email": email,
             "phone": phone,
-            "courses": courses_list
+            "courses": courses_list,
+            "mother_name": s.mother_name,
+            "father_name": s.father_name,
+            "parent_phone_number": s.parent_phone_number,
+            "education_qualification": s.user.education_qualification if s.user else None,
+            "profile_picture": s.user.profile_picture if s.user else None,
         })
         
     return response_data

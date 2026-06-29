@@ -25,5 +25,11 @@ class StudentResponse(StudentBase):
     email: Optional[str] = None
     phone: Optional[str] = None
     courses: list[str] = []
+    
+    mother_name: Optional[str] = None
+    father_name: Optional[str] = None
+    parent_phone_number: Optional[str] = None
+    education_qualification: Optional[str] = None
+    profile_picture: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

@@ -475,14 +475,15 @@ async def approve_registration(
                         import traceback
                         traceback.print_exc()
                         err = str(e)
-                        if "already exists" in err.lower() or "already registered" in err.lower():
+                        if "already exists" in err.lower() or "already registered" in err.lower() or "already been registered" in err.lower():
                             try:
                                 print("[APPROVE] User already exists in Supabase. Attempting to list users and find ID...")
                                 admin_client_to_use = admin_client if 'admin_client' in locals() else supabase
                                 all_users_resp = admin_client_to_use.auth.admin.list_users()
                                 users_list = getattr(all_users_resp, 'users', all_users_resp)
                                 for u in users_list:
-                                    if getattr(u, 'email', None) == p.email or (isinstance(u, dict) and u.get('email') == p.email):
+                                    u_email = getattr(u, 'email', None) or (isinstance(u, dict) and u.get('email'))
+                                    if u_email and u_email.lower() == p.email.lower():
                                         supabase_user_id = getattr(u, 'id', None) or (isinstance(u, dict) and u.get('id'))
                                         print(f"[APPROVE] Found existing user ID: {supabase_user_id}")
                                         break

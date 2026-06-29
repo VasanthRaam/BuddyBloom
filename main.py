@@ -69,8 +69,19 @@ async def startup_event():
             await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS push_token VARCHAR;"))
             await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS selected_course_ids UUID[];"))
             await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS selected_batch_ids UUID[];"))
-            # Ensure upi_id column exists on users table
+            await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS mother_name VARCHAR;"))
+            await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS father_name VARCHAR;"))
+            await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS dob DATE;"))
+            await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS education_qualification VARCHAR;"))
+            await conn.execute(text("ALTER TABLE pending_registrations ADD COLUMN IF NOT EXISTS profile_picture TEXT;"))
+            # Ensure upi_id and new fields on users table
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS upi_id VARCHAR;"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS dob DATE;"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS education_qualification VARCHAR;"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture TEXT;"))
+            # Ensure new fields on students table
+            await conn.execute(text("ALTER TABLE students ADD COLUMN IF NOT EXISTS mother_name VARCHAR;"))
+            await conn.execute(text("ALTER TABLE students ADD COLUMN IF NOT EXISTS father_name VARCHAR;"))
             # Ensure course_id and batch_id columns exist on fee_payments table
             await conn.execute(text("ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS course_id UUID;"))
             await conn.execute(text("ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS batch_id UUID;"))

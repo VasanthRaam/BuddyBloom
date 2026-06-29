@@ -20,8 +20,23 @@ async def seed_data():
         await db.commit()
         
         # 2. Define Courses
-        courses_data = ["Hindi", "Subject", "Dance", "Keyboard"]
-        batches_names = ["Trichy batch", "Vaiyampatti batch"]
+        courses_data = [
+            "Hindi (Written)",
+            "Hindi (Spoken)",
+            "Spoken English",
+            "Subject",
+            "Abacus",
+            "Bharathanatyam",
+            "Keyboard",
+            "Singing",
+            "Drawing"
+        ]
+        batches_names = [
+            "Trichy (Melapudur)",
+            "Online",
+            "Vaiyampatti",
+            "Church"
+        ]
         
         created_courses = []
         for name in courses_data:

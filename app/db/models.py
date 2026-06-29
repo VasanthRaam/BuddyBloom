@@ -24,6 +24,9 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     is_approved = Column(Boolean, default=False, server_default="false", nullable=False)
     upi_id = Column(String, nullable=True)
+    dob = Column(Date, nullable=True)
+    education_qualification = Column(String, nullable=True)
+    profile_picture = Column(Text, nullable=True)
 
     # Relationships
     students_as_parent = relationship("Student", back_populates="parent", foreign_keys="[Student.parent_id]")
@@ -58,6 +61,13 @@ class PendingRegistration(Base):
     selected_batch_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
     push_token = Column(String, nullable=True)
     
+    # Extra fields for detailed registration
+    mother_name = Column(String, nullable=True)
+    father_name = Column(String, nullable=True)
+    dob = Column(Date, nullable=True)
+    education_qualification = Column(String, nullable=True)
+    profile_picture = Column(Text, nullable=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -70,6 +80,8 @@ class Student(Base):
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
     date_of_birth = Column(Date)
+    mother_name = Column(String, nullable=True)
+    father_name = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

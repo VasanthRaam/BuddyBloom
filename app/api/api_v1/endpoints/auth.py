@@ -32,6 +32,11 @@ class RegisterRequest(BaseModel):
     batch_ids: list[uuid.UUID] | None = []
     push_token: str | None = None
     supabase_uid: uuid.UUID | None = None
+    mother_name: str | None = None
+    father_name: str | None = None
+    dob: str | None = None
+    education_qualification: str | None = None
+    profile_picture: str | None = None
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -114,6 +119,11 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
         selected_course_ids=request.course_ids,
         selected_batch_ids=request.batch_ids,
         push_token=request.push_token,
+        mother_name=request.mother_name,
+        father_name=request.father_name,
+        dob=request.dob,
+        education_qualification=request.education_qualification,
+        profile_picture=request.profile_picture,
     )
     db.add(pending)
     await db.flush()
@@ -484,6 +494,9 @@ async def approve_registration(
                 phone=p.phone,
                 role=p.role,
                 is_approved=True,
+                dob=p.dob,
+                education_qualification=p.education_qualification,
+                profile_picture=p.profile_picture,
             )
             session.add(new_user)
             await session.flush()
@@ -497,6 +510,9 @@ async def approve_registration(
                     parent_id=new_user.id,
                     first_name=p.full_name.split()[0],
                     last_name=" ".join(p.full_name.split()[1:]) if len(p.full_name.split()) > 1 else "",
+                    mother_name=p.mother_name,
+                    father_name=p.father_name,
+                    date_of_birth=p.dob,
                 )
                 session.add(student_profile)
                 await session.flush()

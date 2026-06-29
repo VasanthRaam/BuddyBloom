@@ -34,6 +34,7 @@ class RegisterRequest(BaseModel):
     supabase_uid: uuid.UUID | None = None
     mother_name: str | None = None
     father_name: str | None = None
+    parent_phone_number: str | None = None
     dob: str | None = None
     education_qualification: str | None = None
     profile_picture: str | None = None
@@ -107,6 +108,15 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
     if existing_user.scalars().first():
         raise HTTPException(status_code=409, detail="This email is already registered. Please login.")
 
+    # Parse Date of Birth securely to avoid DB casting errors
+    import datetime
+    parsed_dob = None
+    if request.dob:
+        try:
+            parsed_dob = datetime.datetime.strptime(request.dob, "%Y-%m-%d").date()
+        except ValueError:
+            pass # fallback to null if invalid
+
     # Store the pending registration (password stored temporarily for admin to create Supabase account)
     pending = PendingRegistration(
         id=request.supabase_uid if request.supabase_uid else uuid.uuid4(),
@@ -121,7 +131,8 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
         push_token=request.push_token,
         mother_name=request.mother_name,
         father_name=request.father_name,
-        dob=request.dob,
+        parent_phone_number=request.parent_phone_number,
+        dob=parsed_dob,
         education_qualification=request.education_qualification,
         profile_picture=request.profile_picture,
     )
@@ -512,6 +523,7 @@ async def approve_registration(
                     last_name=" ".join(p.full_name.split()[1:]) if len(p.full_name.split()) > 1 else "",
                     mother_name=p.mother_name,
                     father_name=p.father_name,
+                    parent_phone_number=p.parent_phone_number,
                     date_of_birth=p.dob,
                 )
                 session.add(student_profile)

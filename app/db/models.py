@@ -64,6 +64,7 @@ class PendingRegistration(Base):
     # Extra fields for detailed registration
     mother_name = Column(String, nullable=True)
     father_name = Column(String, nullable=True)
+    parent_phone_number = Column(String, nullable=True)
     dob = Column(Date, nullable=True)
     education_qualification = Column(String, nullable=True)
     profile_picture = Column(Text, nullable=True)
@@ -82,6 +83,7 @@ class Student(Base):
     date_of_birth = Column(Date)
     mother_name = Column(String, nullable=True)
     father_name = Column(String, nullable=True)
+    parent_phone_number = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

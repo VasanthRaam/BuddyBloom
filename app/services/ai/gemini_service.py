@@ -61,41 +61,57 @@ If a question is outside academy learning, politely redirect the student."""
             raise HTTPException(status_code=500, detail="AI Service is not configured. Please supply a Gemini or OpenAI API Key.")
 
     def _generate_gemini_response(self, message: str, history: list = None) -> str:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={settings.GEMINI_API_KEY}"
+        
+        contents = []
+        if history:
+            for msg in history:
+                role = msg.get("role")
+                if role in ("assistant", "bot", "model"):
+                    role = "model"
+                else:
+                    role = "user"
+                contents.append({
+                    "role": role,
+                    "parts": [{"text": msg.get("content", "")}]
+                })
+        
+        contents.append({
+            "role": "user",
+            "parts": [{"text": message}]
+        })
+        
+        payload = {
+            "contents": contents,
+            "systemInstruction": {
+                "parts": [{"text": self.system_prompt}]
+            }
+        }
+        
         try:
-            model = genai.GenerativeModel(
-                model_name=self.model_name,
-                system_instruction=self.system_prompt
-            )
-            
-            if history:
-                formatted_history = []
-                for msg in history:
-                    role = msg.get("role")
-                    if role in ("assistant", "bot", "model"):
-                        role = "model"
-                    else:
-                        role = "user"
-                    
-                    formatted_history.append({
-                        "role": role,
-                        "parts": [msg.get("content", "")]
-                    })
+            resp = httpx.post(url, json=payload, timeout=30.0)
+            if resp.status_code != 200:
+                err_text = resp.text
+                logger.error(f"Gemini API returned error code {resp.status_code}: {err_text}")
+                if "prepayment credits" in err_text.lower() or "billing" in err_text.lower() or "quota" in err_text.lower():
+                    raise HTTPException(
+                        status_code=402, 
+                        detail="AI Chatbot billing credits or quota are depleted. Please check your Google AI Studio billing status."
+                    )
+                raise HTTPException(status_code=resp.status_code, detail=f"Gemini error: {err_text}")
                 
-                chat = model.start_chat(history=formatted_history)
-                response = chat.send_message(message)
-            else:
-                response = model.generate_content(message)
-                
-            return response.text
+            data = resp.json()
+            try:
+                reply = data["candidates"][0]["content"]["parts"][0]["text"]
+                return reply
+            except (KeyError, IndexError) as parse_err:
+                logger.error(f"Failed to parse Gemini response structure: {data}. Error: {parse_err}")
+                raise HTTPException(status_code=500, detail=f"Failed to parse Gemini response: {data}")
+        except HTTPException as e:
+            raise e
         except Exception as e:
-            err_msg = str(e)
-            logger.error(f"Error calling Gemini API: {err_msg}")
-            if "prepayment credits" in err_msg.lower() or "billing" in err_msg.lower() or "quota" in err_msg.lower():
-                raise HTTPException(
-                    status_code=402, 
-                    detail="AI Chatbot billing credits or quota are depleted. Please check your Google AI Studio billing status."
-                )
-            raise HTTPException(status_code=500, detail=f"AI Chatbot error: {err_msg}")
+            logger.error(f"Failed direct Gemini call: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to generate response from Gemini: {str(e)}")
 
     def _generate_openai_response(self, message: str, history: list = None) -> str:
         url = "https://api.openai.com/v1/chat/completions"

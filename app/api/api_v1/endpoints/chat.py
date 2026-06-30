@@ -23,6 +23,27 @@ async def chat_with_tutor(
     try:
         user_uuid = uuid.UUID(current_user["id"])
         
+        # Check daily prompt limit (max 10 prompts per 24 hours) for non-admin users
+        if current_user.get("role") != "admin":
+            from datetime import datetime, timedelta, timezone
+            from sqlalchemy import func
+            
+            limit_time = datetime.now(timezone.utc) - timedelta(hours=24)
+            
+            prompt_count_res = await db.execute(
+                select(func.count(ChatMessage.id))
+                .where(ChatMessage.user_id == user_uuid)
+                .where(ChatMessage.role == "user")
+                .where(ChatMessage.created_at >= limit_time)
+            )
+            prompt_count = prompt_count_res.scalar() or 0
+            
+            if prompt_count >= 10:
+                raise HTTPException(
+                    status_code=429,
+                    detail="You have reached your daily limit of 10 prompts. Please try again tomorrow."
+                )
+        
         # 1. Fetch the last 10 messages from the database
         result = await db.execute(
             select(ChatMessage)

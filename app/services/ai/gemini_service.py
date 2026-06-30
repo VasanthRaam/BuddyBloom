@@ -42,13 +42,25 @@ Do not generate harmful or unrelated content.
 If a question is outside academy learning, politely redirect the student."""
 
     def generate_response(self, message: str, history: list = None) -> str:
-        # If OpenAI key is present, route to OpenAI as preferred option / fallback
-        if settings.OPENAI_API_KEY:
+        # Prioritize Gemini if GEMINI_API_KEY is configured
+        if settings.GEMINI_API_KEY:
+            try:
+                return self._generate_gemini_response(message, history)
+            except Exception as e:
+                # If Gemini fails and OpenAI is configured, fall back to OpenAI
+                if settings.OPENAI_API_KEY:
+                    logger.warning(f"Gemini failed, falling back to OpenAI: {e}")
+                    try:
+                        return self._generate_openai_response(message, history)
+                    except Exception as openai_err:
+                        raise openai_err
+                raise e
+        elif settings.OPENAI_API_KEY:
             return self._generate_openai_response(message, history)
-
-        if not settings.GEMINI_API_KEY:
+        else:
             raise HTTPException(status_code=500, detail="AI Service is not configured. Please supply a Gemini or OpenAI API Key.")
-        
+
+    def _generate_gemini_response(self, message: str, history: list = None) -> str:
         try:
             model = genai.GenerativeModel(
                 model_name=self.model_name,

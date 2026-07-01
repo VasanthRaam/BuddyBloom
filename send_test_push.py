@@ -11,22 +11,22 @@ async def send_emergency_test(email):
         user = result.scalars().first()
         
         if not user:
-            print(f"❌ User with email {email} not found.")
+            print(f"[-] User with email {email} not found.")
             return
 
-        print(f"✅ Found user {user.full_name}. Checking for push tokens...")
+        print(f"[i] Found user {user.full_name}. Checking for push tokens...")
         
         # Find tokens
         result = await db.execute(select(UserPushToken).where(UserPushToken.user_id == user.id))
         tokens = result.scalars().all()
         
         if not tokens:
-            print(f"❌ No push tokens found for {email}. Did you log in on the phone at least once?")
+            print(f"[-] No push tokens found for {email}. Did you log in on the phone at least once?")
             return
 
-        print(f"🚀 Sending test notification to {len(tokens)} device(s)...")
+        print(f"[i] Sending test notification to {len(tokens)} device(s)...")
         
-        title = "BuddyBloom Test 🔔"
+        title = "BuddyBloom Test"
         message = f"Your login is {email}. This notification reached you successfully!"
         
         await NotificationService.send_push_notification(
@@ -36,9 +36,9 @@ async def send_emergency_test(email):
             message, 
             {"type": "test"}
         )
-        print("✅ Done! Check your phone now.")
+        print("[+] Done! Check your phone now.")
 
 if __name__ == "__main__":
     import sys
-    email = sys.argv[1] if len(sys.argv) > 1 else "vasanth@example.com" # Default or provided
+    email = sys.argv[1] if len(sys.argv) > 1 else "vasanth@example.com"
     asyncio.run(send_emergency_test(email))

@@ -37,11 +37,11 @@ class NotificationService:
                 # Expo allows sending up to 100 messages in a single request
                 response = await client.post(url, json=messages)
                 if response.status_code != 200:
-                    print(f"⚠️ [PUSH] Expo API returned error: {response.text}")
+                    print(f"[PUSH] Expo API returned error: {response.text}")
                 else:
-                    print(f"🚀 [PUSH] Notification sent to user {user_id} ({len(tokens)} devices)")
+                    print(f"[PUSH] Notification sent to user {user_id} ({len(tokens)} devices)")
             except Exception as e:
-                print(f"❌ [PUSH] Failed to send notification to user {user_id}: {e}")
+                print(f"[PUSH] Failed to send notification to user {user_id}: {e}")
 
     @staticmethod
     async def notify_students_for_new_quiz(db: AsyncSession, course_id: UUID, quiz_id: UUID, quiz_title: str):

@@ -42,6 +42,7 @@ app.add_middleware(
         "http://localhost:19006",
         "http://localhost:19000",
         "https://buddybloom.onrender.com",
+        "https://buddybloom-dev.onrender.com",
         "https://vasanthacademy.com",
         "https://www.vasanthacademy.com",
     ],

@@ -20,14 +20,20 @@ async def ping():
     Returns server uptime to help the frontend detect cold starts.
     Call this on app startup to warm up a sleeping free-tier server.
     """
+    from app.core.config import settings
+    db_part = settings.DATABASE_URL.split('//')[-1].split('@')[0]
+    db_user = db_part.split(':')[0]
+    db_host = settings.DATABASE_URL.split('@')[-1].split('/')[0]
+    
     uptime_seconds = round(time.monotonic() - _SERVER_START_TIME, 1)
     return {
         "status": "ok",
         "server_time": datetime.datetime.utcnow().isoformat() + "Z",
         "server_started_at": _SERVER_START_WALL,
         "uptime_seconds": uptime_seconds,
-        # Flag a likely cold start: server started less than 30 seconds ago
         "cold_start": uptime_seconds < 30,
+        "database_user": db_user,
+        "database_host": db_host,
     }
 
 

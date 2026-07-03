@@ -121,44 +121,52 @@ async def get_leaderboard(
     if period == "monthly":
         period_filter = "AND pt.created_at >= date_trunc('month', now())"
 
-    # Build enrollment filter
+    # Search filter (safe — no string injection, use ILIKE with param)
+    search_filter = ""
+    search_param = None
+    if search and search.strip():
+        search_filter = "AND u.full_name ILIKE :search_val"
+        search_param = f"%{search.strip()}%"
+
+    # Build optional enrollment join + filter
     enrollment_join = ""
     enrollment_filter = ""
+    extra_cols = "NULL::TEXT AS course_name, NULL::TEXT AS batch_name"
     if course_id or batch_id:
         enrollment_join = """
             JOIN enrollments enr ON enr.student_id = s.id
             JOIN batches b ON b.id = enr.batch_id
             JOIN courses c ON c.id = b.course_id
         """
+        extra_cols = "MAX(c.name) AS course_name, MAX(b.name) AS batch_name"
         if course_id:
             enrollment_filter += f" AND c.id = '{course_id}'"
         if batch_id:
             enrollment_filter += f" AND b.id = '{batch_id}'"
 
-    # Search filter
-    search_filter = ""
-    if search:
-        clean = search.replace("'", "''")
-        search_filter = f"AND u.full_name ILIKE '%{clean}%'"
-
     sql = text(f"""
-        SELECT
-            s.id as student_id,
-            u.full_name,
-            u.profile_picture,
-            COALESCE(SUM(pt.points), 0) AS current_points,
-            MAX(c.name) AS course_name,
-            MAX(b.name) AS batch_name,
-            RANK() OVER (ORDER BY COALESCE(SUM(pt.points), 0) DESC) AS rank
-        FROM students s
-        JOIN users u ON u.id = s.user_id
-        LEFT JOIN point_transactions pt ON pt.student_id = s.id {period_filter}
-        {enrollment_join}
-        WHERE 1=1
-        {enrollment_filter}
-        {search_filter}
-        GROUP BY s.id, u.full_name, u.profile_picture
-        ORDER BY current_points DESC
+        WITH base AS (
+            SELECT
+                s.id AS student_id,
+                u.full_name,
+                u.profile_picture,
+                COALESCE(SUM(pt.points), 0) AS current_points,
+                {extra_cols}
+            FROM students s
+            JOIN users u ON u.id = s.user_id
+            LEFT JOIN point_transactions pt ON pt.student_id = s.id {period_filter}
+            {enrollment_join}
+            WHERE s.user_id IS NOT NULL
+            {enrollment_filter}
+            {search_filter}
+            GROUP BY s.id, u.full_name, u.profile_picture
+        ),
+        ranked AS (
+            SELECT *, RANK() OVER (ORDER BY current_points DESC) AS rank
+            FROM base
+        )
+        SELECT * FROM ranked
+        ORDER BY rank
         LIMIT :limit OFFSET :offset
     """)
 
@@ -167,21 +175,25 @@ async def get_leaderboard(
         FROM students s
         JOIN users u ON u.id = s.user_id
         {enrollment_join}
-        WHERE 1=1
+        WHERE s.user_id IS NOT NULL
         {enrollment_filter}
         {search_filter}
     """)
 
-    result = await db.execute(sql, {"limit": page_size, "offset": offset})
+    params = {"limit": page_size, "offset": offset}
+    if search_param:
+        params["search_val"] = search_param
+
+    result = await db.execute(sql, params)
     rows = result.fetchall()
 
-    count_result = await db.execute(count_sql)
+    count_result = await db.execute(count_sql, {"search_val": search_param} if search_param else {})
     total = count_result.scalar() or 0
 
     entries = []
-    for i, row in enumerate(rows):
+    for row in rows:
         entries.append({
-            "rank": offset + i + 1,
+            "rank": row.rank,
             "student_id": str(row.student_id),
             "student_name": row.full_name,
             "profile_picture": row.profile_picture,

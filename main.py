@@ -93,7 +93,7 @@ async def startup_event():
             # Ensure student_id column exists on incomes table
             await conn.execute(text("ALTER TABLE incomes ADD COLUMN IF NOT EXISTS student_id UUID;"))
 
-            # ── StarSpark Rewards System Tables ───────────────────────────────
+            # ── XP System Rewards Tables ──────────────────────────────────────
             await conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS point_transactions (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -158,7 +158,7 @@ async def startup_event():
                     (gen_random_uuid(), 'Bluetooth Headphones', 'Wireless headphones to make studying more enjoyable.', 10000, NULL, 4),
                     (gen_random_uuid(), 'Study Essentials Pack', 'Notebooks, pens, and organizers to kickstart success.', 5000, NULL, 5);
                 """))
-                print("[StarSpark] Seeded default reward catalog items.")
+                print("[XP System] Seeded default reward catalog items.")
 
             print("Successfully ran startup database migrations!")
 

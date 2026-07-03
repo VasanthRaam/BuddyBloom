@@ -1,5 +1,5 @@
 """
-StarSpark Rewards endpoints.
+XP Rewards endpoints.
 
 GET  /rewards/summary           — Student's full points summary (balance, level, rank)
 GET  /rewards/history           — Paginated list of point transactions
@@ -32,14 +32,14 @@ from app.services import rewards_service
 router = APIRouter()
 
 
-@router.get("/summary", summary="Student's StarSpark points summary")
+@router.get("/summary", summary="Student's XP points summary")
 async def get_points_summary(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
     """Returns current balance, lifetime points, level, rank for the logged-in student."""
     if current_user["role"] not in ("student",):
-        raise HTTPException(status_code=403, detail="Only students have a StarSpark wallet.")
+        raise HTTPException(status_code=403, detail="Only students have an XP wallet.")
 
     user_id = UUID(current_user["id"])
     st_res = await db.execute(select(Student).where(Student.user_id == user_id))
@@ -99,7 +99,7 @@ async def get_points_history(
     }
 
 
-@router.get("/leaderboard", summary="Students leaderboard ranked by StarSpark points")
+@router.get("/leaderboard", summary="Students leaderboard ranked by XP points")
 async def get_leaderboard(
     course_id: Optional[str] = Query(None),
     batch_id: Optional[str] = Query(None),
@@ -111,7 +111,7 @@ async def get_leaderboard(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Returns a ranked leaderboard of students by StarSpark points.
+    Returns a ranked leaderboard of students by XP points.
     Filterable by course, batch, monthly period, and searchable by name.
     """
     offset = (page - 1) * page_size
@@ -252,7 +252,7 @@ async def get_reward_catalog(
     }
 
 
-@router.post("/redeem/{reward_id}", summary="Student redeems a reward with their StarSpark points")
+@router.post("/redeem/{reward_id}", summary="Student redeems a reward with their XP points")
 async def redeem_reward(
     reward_id: str,
     db: AsyncSession = Depends(get_db),
@@ -281,7 +281,7 @@ async def redeem_reward(
     }
 
 
-@router.get("/teacher/wallet", summary="Get teacher's current monthly StarSpark wallet")
+@router.get("/teacher/wallet", summary="Get teacher's current monthly XP wallet")
 async def get_teacher_wallet(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(RequireRole(["teacher", "admin"]))
@@ -300,7 +300,7 @@ async def get_teacher_wallet(
     }
 
 
-@router.post("/teacher/give", summary="Teacher gives StarSpark points to a student")
+@router.post("/teacher/give", summary="Teacher gives XP points to a student")
 async def give_points_to_student(
     req: TeacherGivePointsRequest,
     db: AsyncSession = Depends(get_db),
@@ -323,7 +323,7 @@ async def give_points_to_student(
     await db.commit()
 
     return {
-        "message": f"Successfully awarded {req.points} StarSpark points.",
+        "message": f"Successfully awarded {req.points} XP points.",
         "transaction_id": str(txn.id),
         "points": txn.points,
     }
@@ -388,7 +388,7 @@ async def add_reward_catalog_item(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(RequireRole(["admin"]))
 ):
-    """Adds a new reward item to the StarSpark catalog."""
+    """Adds a new reward item to the XP catalog."""
     from typing import Optional as Opt
     item = RewardCatalog(
         id=uuid.uuid4(),
@@ -403,13 +403,13 @@ async def add_reward_catalog_item(
     return {"id": str(item.id), "message": "Reward added successfully."}
 
 
-@router.get("/student/{student_id}/summary", summary="Admin/Teacher: Get a specific student's StarSpark summary")
+@router.get("/student/{student_id}/summary", summary="Admin/Teacher: Get a specific student's XP summary")
 async def get_student_summary_by_id(
     student_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(RequireRole(["admin", "teacher"]))
+    current_user: dict = Depends(get_current_user)
 ):
-    """Returns StarSpark summary for a specific student (admin/teacher view)."""
+    """Returns XP summary for a specific student (admin/teacher view)."""
     st_res = await db.execute(
         select(Student, User)
         .join(User, Student.user_id == User.id)

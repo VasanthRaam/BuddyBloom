@@ -134,13 +134,13 @@ async def submit_quiz(
         eval_result = await QuizService.submit_quiz(db, quiz_id, student.id, submission)
         attempt = eval_result["attempt"]
 
-        # ── StarSpark Points: award after quiz submission ──────────────────
+        # ── XP Points: award after quiz submission ──────────────────────────
         try:
             from app.services.rewards_service import award_quiz_points
             await award_quiz_points(db, student.id, attempt.id, attempt.total_score)
             await db.commit()
         except Exception as pts_err:
-            print(f"[StarSpark] Failed to award points for attempt {attempt.id}: {pts_err}")
+            print(f"[XP System] Failed to award points for attempt {attempt.id}: {pts_err}")
 
         return QuizResultResponse(
             attempt_id=attempt.id,

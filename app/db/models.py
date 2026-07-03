@@ -428,12 +428,12 @@ class Lead(Base):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# StarSpark Rewards System
+# XP Rewards System
 # ──────────────────────────────────────────────────────────────────────────────
 
 class PointTransaction(Base):
     """
-    Records every StarSpark point credit or debit for a student.
+    Records every XP credit or debit for a student.
     Sources: 'quiz' (auto-awarded after quiz), 'teacher' (manual award), 'admin', 'redemption' (debit).
     The quiz_attempt_id carries a UNIQUE constraint to prevent double-awarding the same quiz attempt.
     """
@@ -454,7 +454,7 @@ class PointTransaction(Base):
 
 class TeacherWallet(Base):
     """
-    Monthly StarSpark point wallet for teachers.
+    Monthly XP point wallet for teachers.
     Resets to 1000 on the 1st of every month. Unused points expire.
     """
     __tablename__ = "teacher_wallets"
@@ -468,12 +468,12 @@ class TeacherWallet(Base):
     expires_at = Column(DateTime(timezone=True), nullable=True)
     last_reset_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    teacher = relationship("User", backref="starspark_wallet")
+    teacher = relationship("User", backref="xp_wallet")
 
 
 class RewardCatalog(Base):
     """
-    Admin-configurable list of rewards that students can redeem with their StarSpark points.
+    Admin-configurable list of rewards that students can redeem with their XP points.
     """
     __tablename__ = "reward_catalog"
 

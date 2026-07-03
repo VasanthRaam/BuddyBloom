@@ -2,7 +2,7 @@
 Profile endpoints — Student and Teacher profile views + photo upload.
 
 Student (GET /profile/me):
-  Returns personal details, academic info (enrollments), and StarSpark summary.
+  Returns personal details, academic info (enrollments), and XP summary.
 
 Student (PUT /profile/me):
   Allows editing phone and email only (admin controls all other fields).
@@ -37,7 +37,7 @@ async def get_my_profile(
 ):
     """
     Returns the full profile of the logged-in user.
-    For students: personal info + academic enrollments + StarSpark summary.
+    For students: personal info + academic enrollments + XP summary.
     For teachers: personal info + assigned batches + monthly wallet.
     """
     user_id = UUID(current_user["id"])
@@ -69,7 +69,7 @@ async def get_my_profile(
                     course_name=course.name,
                 ))
 
-            # StarSpark summary
+            # XP summary
             summary = await rewards_service.get_student_summary(db, student.id, user.full_name)
         else:
             summary = {

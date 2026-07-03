@@ -43,7 +43,7 @@ class StudentProfileResponse(BaseModel):
     parent_phone_number: Optional[str]
     # Enrollments
     enrollments: List[EnrollmentInfo] = []
-    # StarSpark summary
+    # XP summary
     current_points: int = 0
     lifetime_points: int = 0
     quiz_points: int = 0

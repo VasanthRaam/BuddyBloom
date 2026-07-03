@@ -1,5 +1,5 @@
 """
-StarSpark Rewards Service
+XP Rewards Service
 
 Handles all point operations:
 - award_quiz_points: Called after quiz submission; idempotent via unique constraint on quiz_attempt_id
@@ -34,7 +34,7 @@ LEVELS = [
     (6000,  "Champion",   12000),
     (12000, "Legend",     25000),
     (25000, "Grand Master", 50000),
-    (50000, "StarSpark Elite", None),
+    (50000, "XP Elite", None),
 ]
 
 
@@ -66,7 +66,7 @@ def _compute_level(lifetime_points: int) -> tuple[int, str, int, float]:
 
 
 async def get_student_balance(db: AsyncSession, student_id: uuid.UUID) -> int:
-    """Returns current StarSpark balance (sum of all point transactions)."""
+    """Returns current XP balance (sum of all point transactions)."""
     result = await db.execute(
         select(func.coalesce(func.sum(PointTransaction.points), 0))
         .where(PointTransaction.student_id == student_id)
@@ -91,7 +91,7 @@ async def award_quiz_points(
     correct_answers: int
 ) -> Optional[PointTransaction]:
     """
-    Awards StarSpark points after quiz completion.
+    Awards XP points after quiz completion.
     Safe to call multiple times — idempotent via unique (student_id, quiz_attempt_id) constraint.
     Returns None if points were already awarded for this attempt.
     """
@@ -209,7 +209,7 @@ async def teacher_give_points(
 
 async def get_student_summary(db: AsyncSession, student_id: uuid.UUID, student_name: str) -> dict:
     """
-    Returns full StarSpark summary for a student: balance, lifetime pts, breakdown by source, level, rank.
+    Returns full XP summary for a student: balance, lifetime pts, breakdown by source, level, rank.
     """
     # Get all transactions
     txns_result = await db.execute(

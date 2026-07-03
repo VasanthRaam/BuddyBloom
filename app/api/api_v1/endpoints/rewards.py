@@ -300,7 +300,7 @@ async def get_teacher_wallet(
     }
 
 
-@router.post("/teacher/give", summary="Teacher gives XP points to a student")
+@router.post("/teacher/give", summary="Teacher/Admin gives XP points to a student")
 async def give_points_to_student(
     req: TeacherGivePointsRequest,
     db: AsyncSession = Depends(get_db),
@@ -308,9 +308,11 @@ async def give_points_to_student(
 ):
     """
     Teacher distributes points from their monthly wallet to a student.
-    Deducts from wallet immediately. Fails if balance is insufficient.
+    Admin has unlimited points — no wallet deduction.
+    Deducts from wallet immediately for teachers. Fails if balance is insufficient.
+    Creates an in-app notification for the student.
     """
-    teacher_id = UUID(current_user["id"])
+    giver_id = UUID(current_user["id"])
     student_id = UUID(req.student_id)
 
     # Validate student exists
@@ -319,7 +321,24 @@ async def give_points_to_student(
     if not student:
         raise HTTPException(status_code=404, detail="Student not found.")
 
-    txn = await rewards_service.teacher_give_points(db, teacher_id, student_id, req.points, req.reason)
+    if current_user["role"] == "admin":
+        # Admin: unlimited points, no wallet deduction
+        txn = await rewards_service.admin_give_points(db, giver_id, student_id, req.points, req.reason)
+    else:
+        # Teacher: wallet-limited
+        txn = await rewards_service.teacher_give_points(db, giver_id, student_id, req.points, req.reason)
+
+    # Create in-app notification for the student
+    from app.db.models import Notification
+    notif = Notification(
+        id=uuid.uuid4(),
+        user_id=student.user_id,
+        title="⭐ XP Points Received!",
+        message=f"You received {req.points} XP from {current_user['full_name']}: {req.reason}",
+        link_to="Leaderboard",
+    )
+    db.add(notif)
+
     await db.commit()
 
     return {

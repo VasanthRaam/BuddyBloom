@@ -207,6 +207,32 @@ async def teacher_give_points(
     return txn
 
 
+async def admin_give_points(
+    db: AsyncSession,
+    admin_id: uuid.UUID,
+    student_id: uuid.UUID,
+    points: int,
+    reason: str
+) -> PointTransaction:
+    """
+    Admin awards points to a student with NO wallet limit.
+    """
+    if points <= 0:
+        raise HTTPException(status_code=400, detail="Points must be a positive number.")
+
+    txn = PointTransaction(
+        id=uuid.uuid4(),
+        student_id=student_id,
+        points=points,
+        source="admin",
+        reason=reason,
+        given_by=admin_id,
+    )
+    db.add(txn)
+    await db.flush()
+    return txn
+
+
 async def get_student_summary(db: AsyncSession, student_id: uuid.UUID, student_name: str) -> dict:
     """
     Returns full XP summary for a student: balance, lifetime pts, breakdown by source, level, rank.

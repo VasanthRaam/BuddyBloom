@@ -154,6 +154,76 @@ async def get_student_summary(
         "quiz": quiz,
     }
 
+@router.get("/teacher-students")
+async def get_teacher_students(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Returns students enrolled in the calling teacher's batches.
+    Same shape as the admin /students/ endpoint.
+    """
+    from app.db.models import Student, Enrollment, Batch, Course, User as UserModel
+    from sqlalchemy.orm import selectinload
+
+    teacher_id = UUID(current_user["id"])
+
+    # Get batches assigned to this teacher
+    batch_res = await db.execute(
+        select(Batch).where(Batch.teacher_id == teacher_id)
+    )
+    teacher_batches = batch_res.scalars().all()
+    teacher_batch_ids = [b.id for b in teacher_batches]
+
+    if not teacher_batch_ids:
+        return []
+
+    # Get students enrolled in those batches
+    result = await db.execute(
+        select(Student)
+        .options(
+            selectinload(Student.user),
+            selectinload(Student.parent),
+            selectinload(Student.enrollments).selectinload(Enrollment.batch).selectinload(Batch.course)
+        )
+        .join(Enrollment, Enrollment.student_id == Student.id)
+        .where(Enrollment.batch_id.in_(teacher_batch_ids))
+        .distinct()
+    )
+    students = result.scalars().unique().all()
+
+    response_data = []
+    for s in students:
+        courses_list = []
+        for e in s.enrollments:
+            if e.batch and e.batch.course:
+                courses_list.append(e.batch.course.name)
+        courses_list = list(set(courses_list))
+
+        email = s.user.email if s.user else (s.parent.email if s.parent else None)
+        phone = s.user.phone if s.user else (s.parent.phone if s.parent else None)
+
+        response_data.append({
+            "id": str(s.id),
+            "first_name": s.first_name,
+            "last_name": s.last_name,
+            "date_of_birth": str(s.date_of_birth) if s.date_of_birth else None,
+            "parent_id": str(s.parent_id) if s.parent_id else None,
+            "user_id": str(s.user_id) if s.user_id else None,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "email": email,
+            "phone": phone,
+            "courses": courses_list,
+            "mother_name": s.mother_name,
+            "father_name": s.father_name,
+            "parent_phone_number": s.parent_phone_number,
+            "education_qualification": s.user.education_qualification if s.user else None,
+            "profile_picture": s.user.profile_picture if s.user else None,
+        })
+
+    return response_data
+
+
 @router.get("/{student_id}", response_model=StudentResponse)
 async def read_student(
     student_id: UUID, 

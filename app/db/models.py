@@ -425,3 +425,86 @@ class Lead(Base):
     batch = Column(String(50), nullable=False)  # "trichy" or "vaiyampatti"
     message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# StarSpark Rewards System
+# ──────────────────────────────────────────────────────────────────────────────
+
+class PointTransaction(Base):
+    """
+    Records every StarSpark point credit or debit for a student.
+    Sources: 'quiz' (auto-awarded after quiz), 'teacher' (manual award), 'admin', 'redemption' (debit).
+    The quiz_attempt_id carries a UNIQUE constraint to prevent double-awarding the same quiz attempt.
+    """
+    __tablename__ = "point_transactions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    student_id = Column(UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
+    points = Column(Integer, nullable=False)  # positive = credit, negative = debit
+    source = Column(String(50), nullable=False)  # 'quiz', 'teacher', 'admin', 'redemption'
+    reason = Column(Text, nullable=True)
+    quiz_attempt_id = Column(UUID(as_uuid=True), ForeignKey("quiz_attempts.id", ondelete="SET NULL"), nullable=True)
+    given_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    student = relationship("Student", backref="point_transactions")
+    giver = relationship("User", foreign_keys=[given_by])
+
+
+class TeacherWallet(Base):
+    """
+    Monthly StarSpark point wallet for teachers.
+    Resets to 1000 on the 1st of every month. Unused points expire.
+    """
+    __tablename__ = "teacher_wallets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    teacher_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    total_points = Column(Integer, nullable=False, default=1000)
+    remaining_points = Column(Integer, nullable=False, default=1000)
+    distributed_points = Column(Integer, nullable=False, default=0)
+    month_year = Column(String(7), nullable=False)  # e.g. '2026-07'
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_reset_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    teacher = relationship("User", backref="starspark_wallet")
+
+
+class RewardCatalog(Base):
+    """
+    Admin-configurable list of rewards that students can redeem with their StarSpark points.
+    """
+    __tablename__ = "reward_catalog"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    points_required = Column(Integer, nullable=False)
+    image_url = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, server_default="true", nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    redemptions = relationship("RewardRedemption", back_populates="reward", cascade="all, delete-orphan")
+
+
+class RewardRedemption(Base):
+    """
+    Tracks student reward redemption requests.
+    When a student redeems a reward, points are debited via PointTransaction and this record is created.
+    """
+    __tablename__ = "reward_redemptions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    student_id = Column(UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
+    reward_id = Column(UUID(as_uuid=True), ForeignKey("reward_catalog.id", ondelete="CASCADE"), nullable=False)
+    points_spent = Column(Integer, nullable=False)
+    status = Column(String, default="pending", nullable=False)  # pending, approved, rejected
+    admin_note = Column(Text, nullable=True)
+    redeemed_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    student = relationship("Student", backref="reward_redemptions")
+    reward = relationship("RewardCatalog", back_populates="redemptions")
+

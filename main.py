@@ -92,7 +92,76 @@ async def startup_event():
             await conn.execute(text("ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS is_manual BOOLEAN NOT NULL DEFAULT FALSE;"))
             # Ensure student_id column exists on incomes table
             await conn.execute(text("ALTER TABLE incomes ADD COLUMN IF NOT EXISTS student_id UUID;"))
+
+            # ── StarSpark Rewards System Tables ───────────────────────────────
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS point_transactions (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+                    points INTEGER NOT NULL,
+                    source VARCHAR(50) NOT NULL,
+                    reason TEXT,
+                    quiz_attempt_id UUID REFERENCES quiz_attempts(id) ON DELETE SET NULL,
+                    given_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                );
+            """))
+            await conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_point_txn_quiz_attempt
+                ON point_transactions(student_id, quiz_attempt_id)
+                WHERE quiz_attempt_id IS NOT NULL AND source = 'quiz';
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS teacher_wallets (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    teacher_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+                    total_points INTEGER NOT NULL DEFAULT 1000,
+                    remaining_points INTEGER NOT NULL DEFAULT 1000,
+                    distributed_points INTEGER NOT NULL DEFAULT 0,
+                    month_year VARCHAR(7) NOT NULL,
+                    expires_at TIMESTAMPTZ,
+                    last_reset_at TIMESTAMPTZ DEFAULT now()
+                );
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS reward_catalog (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    title VARCHAR NOT NULL,
+                    description TEXT,
+                    points_required INTEGER NOT NULL,
+                    image_url TEXT,
+                    is_active BOOLEAN NOT NULL DEFAULT true,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                );
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS reward_redemptions (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+                    reward_id UUID REFERENCES reward_catalog(id) ON DELETE CASCADE,
+                    points_spent INTEGER NOT NULL,
+                    status VARCHAR NOT NULL DEFAULT 'pending',
+                    admin_note TEXT,
+                    redeemed_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ DEFAULT now()
+                );
+            """))
+            # Seed default reward catalog items if empty
+            count_res = await conn.execute(text("SELECT COUNT(*) FROM reward_catalog;"))
+            if count_res.scalar() == 0:
+                await conn.execute(text("""
+                    INSERT INTO reward_catalog (id, title, description, points_required, image_url, sort_order) VALUES
+                    (gen_random_uuid(), '3 Months Tuition Fee Waiver', 'Get 3 months of tuition fees waived as a top performer!', 50000, NULL, 1),
+                    (gen_random_uuid(), 'Premium Smart Watch', 'A premium smartwatch to reward your dedication.', 30000, NULL, 2),
+                    (gen_random_uuid(), 'Premium Stationery Kit', 'High-quality stationery set for serious students.', 20000, NULL, 3),
+                    (gen_random_uuid(), 'Bluetooth Headphones', 'Wireless headphones to make studying more enjoyable.', 10000, NULL, 4),
+                    (gen_random_uuid(), 'Study Essentials Pack', 'Notebooks, pens, and organizers to kickstart success.', 5000, NULL, 5);
+                """))
+                print("[StarSpark] Seeded default reward catalog items.")
+
             print("Successfully ran startup database migrations!")
+
     except Exception as e:
         print(f"Error during startup database migrations: {e}")
 

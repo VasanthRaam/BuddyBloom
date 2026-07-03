@@ -3,7 +3,7 @@ from app.api.api_v1.endpoints import (
     auth, users, students, batches, courses, 
     attendance, quizzes, notifications, 
     parent_dashboard, dashboard, homework, fees, revenue, chat, enrollments, diagnostics,
-    enquiry
+    enquiry, profile, rewards
 )
 
 api_router = APIRouter()
@@ -26,3 +26,5 @@ api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(enrollments.router, prefix="/enrollments", tags=["enrollments"])
 api_router.include_router(diagnostics.router, prefix="/diagnostics", tags=["diagnostics"])
 api_router.include_router(enquiry.router, prefix="/enquiry", tags=["enquiry"])
+api_router.include_router(profile.router, prefix="/profile", tags=["profile"])
+api_router.include_router(rewards.router, prefix="/rewards", tags=["rewards"])

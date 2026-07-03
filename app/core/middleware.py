@@ -57,12 +57,27 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
         # 3. Verify token
         try:
             payload = await verify_token(token)
+            email = payload.get("email")
             
+            # Resolve database user ID by email to handle database clones across different Supabase tenants
+            db_user_id = payload.get("sub")
+            if email:
+                from app.db.database import AsyncSessionLocal
+                from app.db.models import User
+                from sqlalchemy import select, func
+                async with AsyncSessionLocal() as session:
+                    db_res = await session.execute(
+                        select(User.id).where(func.lower(User.email) == func.lower(email))
+                    )
+                    user_row = db_res.first()
+                    if user_row:
+                        db_user_id = user_row[0]
+
             # 4. Attach user info to the request state
             request.state.user = {
-                "id": payload.get("sub"),
+                "id": db_user_id,
                 "role": payload.get("role"),
-                "email": payload.get("email")
+                "email": email
             }
             
         except Exception as e:

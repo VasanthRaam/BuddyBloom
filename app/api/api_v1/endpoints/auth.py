@@ -94,12 +94,21 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
     if request.role not in allowed_roles:
         raise HTTPException(status_code=400, detail="Invalid role. Allowed: teacher, student, parent")
 
-    # Check if email already exists in pending_registrations
+    # Check if email already has an ACTIVE pending registration
     existing_pending = await db.execute(
-        select(PendingRegistration).where(PendingRegistration.email == request.email)
+        select(PendingRegistration).where(
+            PendingRegistration.email == request.email,
+            PendingRegistration.status == "pending"
+        )
     )
     if existing_pending.scalars().first():
         raise HTTPException(status_code=409, detail="A registration request for this email is already pending.")
+
+    # Delete any existing rejected registration requests for this email to allow re-applying
+    from sqlalchemy import delete
+    await db.execute(
+        delete(PendingRegistration).where(PendingRegistration.email == request.email)
+    )
 
     # Check if email already exists in the main users table
     existing_user = await db.execute(

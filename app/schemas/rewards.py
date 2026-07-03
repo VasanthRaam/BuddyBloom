@@ -11,6 +11,7 @@ class ProfileUpdateRequest(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     profile_picture: Optional[str] = None  # Supabase Storage public URL
+    education_qualification: Optional[str] = None
 
 
 class ProfilePhotoUploadResponse(BaseModel):

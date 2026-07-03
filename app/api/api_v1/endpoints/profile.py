@@ -165,6 +165,8 @@ async def update_my_profile(
         user.email = req.email
     if req.profile_picture is not None:
         user.profile_picture = req.profile_picture
+    if req.education_qualification is not None:
+        user.education_qualification = req.education_qualification
 
     await db.commit()
     return {"message": "Profile updated successfully"}

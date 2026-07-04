@@ -339,6 +339,19 @@ async def give_points_to_student(
     )
     db.add(notif)
 
+    # Trigger real-time push notification
+    from app.services.notification_service import NotificationService
+    try:
+        await NotificationService.send_push_notification(
+            db=db,
+            user_id=student.user_id,
+            title="⭐ XP Points Received!",
+            message=f"You received {req.points} XP from {current_user['full_name']}: {req.reason}",
+            data={"link_to": "Leaderboard"}
+        )
+    except Exception as e:
+        print(f"[PUSH] Failed to trigger push notification for points award: {e}")
+
     await db.commit()
 
     return {

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
+from uuid import UUID
 from app.db.database import get_db
 from app.db.models import Notification
 from app.api.deps import get_current_user
@@ -13,11 +14,12 @@ async def get_notifications(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
+    user_uuid = UUID(current_user["id"])
     result = await db.execute(
         select(Notification)
-        .where(Notification.user_id == current_user["id"])
+        .where(Notification.user_id == user_uuid)
         .order_by(Notification.created_at.desc())
-        .limit(20)
+        .limit(50)
     )
     notifications = result.scalars().all()
     
@@ -38,7 +40,12 @@ async def mark_as_read(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    result = await db.execute(select(Notification).where(Notification.id == notification_id))
+    try:
+        notif_uuid = UUID(notification_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid notification ID")
+
+    result = await db.execute(select(Notification).where(Notification.id == notif_uuid))
     notification = result.scalars().first()
     
     if not notification:

@@ -1,7 +1,7 @@
 import httpx
 
 def main():
-    url = "https://buddybloom.onrender.com/api/v1/diagnostics/ping"
+    url = "https://buddybloom-prod-981707949514.asia-south1.run.app/api/v1/diagnostics/ping"
     print(f"Pinging Render backend: {url}...")
     try:
         resp = httpx.get(url, timeout=30.0)

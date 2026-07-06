@@ -1,7 +1,7 @@
 import httpx
 
 def main():
-    url = "https://buddybloom.onrender.com/api/v1/auth/google-sync"
+    url = "https://buddybloom-prod-981707949514.asia-south1.run.app/api/v1/auth/google-sync"
     payload = {
         "access_token": "mock_token",
         "email": "vasanthraam89@gmail.com",

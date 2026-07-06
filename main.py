@@ -45,6 +45,8 @@ app.add_middleware(
         "https://buddybloom-dev.onrender.com",
         "https://vasanthacademy.com",
         "https://www.vasanthacademy.com",
+        "https://buddybloom-prod-981707949514.asia-south1.run.app",
+        "https://buddybloom-dev-981707949514.asia-south1.run.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],

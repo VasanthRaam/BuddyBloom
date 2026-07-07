@@ -171,6 +171,25 @@ async def update_my_profile(
     await db.commit()
     return {"message": "Profile updated successfully"}
 
+@router.delete("/me", summary="Delete own account")
+async def delete_my_profile(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Deletes the current user's account from the database.
+    """
+    user_id = UUID(current_user["id"])
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    await db.delete(user)
+    await db.commit()
+    return {"message": "Account deleted successfully"}
+
 
 @router.post("/photo-upload-url", summary="Get a Supabase Storage pre-signed upload URL")
 async def get_photo_upload_url(

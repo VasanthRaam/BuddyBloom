@@ -1,0 +1,32 @@
+# Ignore local environment files containing secrets
+.env
+.env.example
+
+# Ignore virtual environments
+venv/
+.venv/
+env/
+
+# Ignore python caches and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore git metadata
+.git/
+.gitignore
+
+# Ignore local database files
+*.db
+*.sqlite3
+
+# Ignore IDE configs
+.vscode/
+.idea/
+.project
+.pydevproject
+
+# Ignore build artifacts
+Dockerfile
+.dockerignore

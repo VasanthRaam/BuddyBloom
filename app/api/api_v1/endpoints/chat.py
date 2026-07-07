@@ -5,7 +5,7 @@ from app.db.database import get_db
 from app.db.models import ChatMessage
 from app.api.deps import get_current_user
 from app.schemas.chat import ChatRequest, ChatResponse
-from app.services.ai.ai_service import AIService, get_ai_service
+from app.services.ai.gemini_service import GeminiService, get_gemini_service
 import uuid
 
 router = APIRouter()
@@ -15,7 +15,7 @@ async def chat_with_tutor(
     request: ChatRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
-    ai_service: AIService = Depends(get_ai_service)
+    gemini_service: GeminiService = Depends(get_gemini_service)
 ):
     """
     Chat with the Hindi Tutor using Gemini, preserving context memory.
@@ -66,8 +66,8 @@ async def chat_with_tutor(
         db.add(user_msg)
         await db.commit()
         
-        # 4. Call AI service with history
-        reply = ai_service.generate_response(request.message, history=history_list)
+        # 4. Call Gemini service with history
+        reply = gemini_service.generate_response(request.message, history=history_list)
         
         # 5. Save the model reply to the database
         bot_msg = ChatMessage(user_id=user_uuid, role="model", content=reply)

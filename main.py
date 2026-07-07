@@ -162,6 +162,32 @@ async def startup_event():
                 """))
                 print("[XP System] Seeded default reward catalog items.")
 
+            # ── Performance Indexes ──────────────────────────────────────────
+            print("[DB Migration] Checking/applying performance B-Tree indexes...")
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_students_parent_id ON students(parent_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_students_user_id ON students(user_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_batches_course_id ON batches(course_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_batches_teacher_id ON batches(teacher_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_attendance_student_date ON attendance(student_id, date);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_attendance_batch_date ON attendance(batch_id, date);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_quizzes_course_id ON quizzes(course_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_quizzes_created_by ON quizzes(created_by);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_questions_quiz_id ON questions(quiz_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_options_question_id ON options(question_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_quiz_attempts_quiz_student ON quiz_attempts(quiz_id, student_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_quiz_attempt_answers_attempt_question ON quiz_attempt_answers(attempt_id, question_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fee_payments_user_status ON fee_payments(user_id, status);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_homework_batch_id ON homework(batch_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_homework_teacher_id ON homework(teacher_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_homework_submissions_homework_student ON homework_submissions(homework_id, student_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE is_read = false;"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_enrollments_student_batch ON enrollments(student_id, batch_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_point_transactions_student ON point_transactions(student_id);"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chat_messages_user_created ON chat_messages(user_id, created_at);"))
+            print("[DB Migration] Performance indexes check completed.")
+
             print("Successfully ran startup database migrations!")
 
     except Exception as e:

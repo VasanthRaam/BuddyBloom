@@ -14,8 +14,7 @@ class Settings(BaseSettings):
     # Firebase Settings
     FIREBASE_PROJECT_ID: str = "buddybloom-app"
 
-    # Gemini API
-    GEMINI_API_KEY: str = ""
+    # AI API Keys
     OPENAI_API_KEY: str = ""
 
     # Database

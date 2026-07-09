@@ -37,6 +37,19 @@ async def ping():
     }
 
 
+@router.get("/db-ping")
+async def db_ping(db: AsyncSession = Depends(get_db)):
+    """
+    Public endpoint to test database connectivity and return errors.
+    """
+    try:
+        await db.execute(text("SELECT 1"))
+        return {"status": "connected", "message": "Database is reachable!"}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
+
+
 @router.get("/latency")
 async def check_latency(
     db: AsyncSession = Depends(get_db),

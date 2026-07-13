@@ -118,7 +118,7 @@ async def get_student_summary(
         present_res = await db.execute(
             select(func.count(Attendance.id)).where(
                 Attendance.student_id == student_id,
-                Attendance.status == AttendanceStatus.present
+                Attendance.status.in_([AttendanceStatus.present, 'present', 'Present', 'PRESENT'])
             )
         )
         total = total_res.scalar() or 0

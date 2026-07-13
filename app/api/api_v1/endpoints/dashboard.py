@@ -86,7 +86,10 @@ async def get_dashboard_stats(
             total_att = await db.execute(select(func.count(Attendance.id)).where(Attendance.student_id == student.id))
             present_att = await db.execute(
                 select(func.count(Attendance.id))
-                .where(Attendance.student_id == student.id, Attendance.status == AttendanceStatus.present)
+                .where(
+                    Attendance.student_id == student.id,
+                    Attendance.status.in_([AttendanceStatus.present, 'present', 'Present', 'PRESENT'])
+                )
             )
             total_count = total_att.scalar() or 0
             present_count = present_att.scalar() or 0
@@ -125,7 +128,10 @@ async def get_dashboard_stats(
             total_att = await db.execute(select(func.count(Attendance.id)).where(Attendance.student_id.in_(student_ids)))
             present_att = await db.execute(
                 select(func.count(Attendance.id))
-                .where(Attendance.student_id.in_(student_ids), Attendance.status == AttendanceStatus.present)
+                .where(
+                    Attendance.student_id.in_(student_ids),
+                    Attendance.status.in_([AttendanceStatus.present, 'present', 'Present', 'PRESENT'])
+                )
             )
             total_count = total_att.scalar() or 0
             present_count = present_att.scalar() or 0

@@ -12,7 +12,18 @@ class GeminiService:
             genai.configure(api_key=settings.GEMINI_API_KEY)
             
         self.model_name = "gemini-2.5-flash"
-        self.system_prompt = """You are Academy AI Teacher.
+        
+        self.general_prompt = """You are Academy AI Teacher.
+
+You help students learn Hindi, Bharatanatyam, Keyboard, Drawing, and academic subjects.
+
+Use simple language suitable for children.
+
+Do not generate harmful or unrelated content.
+
+If a question is outside academy learning, politely redirect the student."""
+
+        self.translation_prompt = """You are Academy AI Teacher.
 
 Your primary task is to translate any phrase or question the user asks into Hindi.
 
@@ -35,26 +46,26 @@ If the input is already in Hindi script, provide:
 
 Ensure the JSON is strictly valid. Do not include markdown code block formatting."""
 
-    def generate_response(self, message: str, history: list = None) -> str:
+    def generate_response(self, message: str, history: list = None, mode: str = "general") -> str:
         # Prioritize Gemini if GEMINI_API_KEY is configured
         if settings.GEMINI_API_KEY:
             try:
-                return self._generate_gemini_response(message, history)
+                return self._generate_gemini_response(message, history, mode)
             except Exception as e:
                 # If Gemini fails and OpenAI is configured, fall back to OpenAI
                 if settings.OPENAI_API_KEY:
                     logger.warning(f"Gemini failed, falling back to OpenAI: {e}")
                     try:
-                        return self._generate_openai_response(message, history)
+                        return self._generate_openai_response(message, history, mode)
                     except Exception as openai_err:
                         raise openai_err
                 raise e
         elif settings.OPENAI_API_KEY:
-            return self._generate_openai_response(message, history)
+            return self._generate_openai_response(message, history, mode)
         else:
             raise HTTPException(status_code=500, detail="AI Service is not configured. Please supply a Gemini or OpenAI API Key.")
 
-    def _generate_gemini_response(self, message: str, history: list = None) -> str:
+    def _generate_gemini_response(self, message: str, history: list = None, mode: str = "general") -> str:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={settings.GEMINI_API_KEY}"
         
         contents = []
@@ -75,10 +86,11 @@ Ensure the JSON is strictly valid. Do not include markdown code block formatting
             "parts": [{"text": message}]
         })
         
+        prompt = self.translation_prompt if mode == "translation" else self.general_prompt
         payload = {
             "contents": contents,
             "systemInstruction": {
-                "parts": [{"text": self.system_prompt}]
+                "parts": [{"text": prompt}]
             }
         }
         
@@ -107,7 +119,7 @@ Ensure the JSON is strictly valid. Do not include markdown code block formatting
             logger.error(f"Failed direct Gemini call: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to generate response from Gemini: {str(e)}")
 
-    def _generate_openai_response(self, message: str, history: list = None) -> str:
+    def _generate_openai_response(self, message: str, history: list = None, mode: str = "general") -> str:
         url = "https://api.openai.com/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
@@ -115,7 +127,8 @@ Ensure the JSON is strictly valid. Do not include markdown code block formatting
         }
         
         # Build messages payload for OpenAI
-        messages = [{"role": "system", "content": self.system_prompt}]
+        prompt = self.translation_prompt if mode == "translation" else self.general_prompt
+        messages = [{"role": "system", "content": prompt}]
         
         if history:
             for msg in history:

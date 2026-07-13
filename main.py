@@ -186,6 +186,8 @@ async def startup_event():
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_enrollments_student_batch ON enrollments(student_id, batch_id);"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_point_transactions_student ON point_transactions(student_id);"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chat_messages_user_created ON chat_messages(user_id, created_at);"))
+            # Add 'mode' column to chat_messages if it doesn't exist
+            await conn.execute(text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS mode VARCHAR DEFAULT 'general';"))
             print("[DB Migration] Performance indexes check completed.")
 
             print("Successfully ran startup database migrations!")

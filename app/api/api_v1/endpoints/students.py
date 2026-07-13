@@ -5,7 +5,7 @@ from typing import List
 from uuid import UUID
 import asyncio
 from app.db.database import get_db
-from app.schemas.student import StudentResponse, StudentCreate
+from app.schemas.student import StudentResponse, StudentCreate, StudentUpdate
 from app.services.student_service import StudentService
 from app.api.deps import get_current_user
 
@@ -237,3 +237,128 @@ async def read_student(
     if student is None:
         raise HTTPException(status_code=404, detail="Student not found")
     return student
+
+@router.put("/{student_id}")
+async def update_student(
+    student_id: UUID,
+    student_in: StudentUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update a student's details. Admin or Teacher only.
+    """
+    if current_user.get("role") not in ["admin", "teacher"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    from app.db.models import Student, User
+    from sqlalchemy.orm import selectinload
+    
+    result = await db.execute(
+        select(Student)
+        .options(selectinload(Student.user), selectinload(Student.parent))
+        .where(Student.id == student_id)
+    )
+    student = result.scalars().first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    if student_in.first_name is not None:
+        student.first_name = student_in.first_name
+    if student_in.last_name is not None:
+        student.last_name = student_in.last_name
+    if student_in.date_of_birth is not None:
+        student.date_of_birth = student_in.date_of_birth
+    if student_in.mother_name is not None:
+        student.mother_name = student_in.mother_name
+    if student_in.father_name is not None:
+        student.father_name = student_in.father_name
+    if student_in.parent_phone_number is not None:
+        student.parent_phone_number = student_in.parent_phone_number
+
+    if student.user:
+        if student_in.first_name is not None or student_in.last_name is not None:
+            fn = student_in.first_name if student_in.first_name is not None else student.first_name
+            ln = student_in.last_name if student_in.last_name is not None else student.last_name
+            student.user.full_name = f"{fn} {ln}".strip()
+        if student_in.email is not None:
+            student.user.email = student_in.email
+        if student_in.phone is not None:
+            student.user.phone = student_in.phone
+
+    await db.commit()
+    
+    # Reload and return
+    result = await db.execute(
+        select(Student)
+        .options(selectinload(Student.user), selectinload(Student.parent))
+        .where(Student.id == student_id)
+    )
+    student = result.scalars().first()
+    
+    email = student.user.email if student.user else (student.parent.email if student.parent else None)
+    phone = student.user.phone if student.user else (student.parent.phone if student.parent else None)
+    
+    return {
+        "id": str(student.id),
+        "first_name": student.first_name,
+        "last_name": student.last_name,
+        "date_of_birth": str(student.date_of_birth) if student.date_of_birth else None,
+        "parent_id": str(student.parent_id),
+        "user_id": str(student.user_id) if student.user_id else None,
+        "email": email,
+        "phone": phone,
+        "mother_name": student.mother_name,
+        "father_name": student.father_name,
+        "parent_phone_number": student.parent_phone_number
+    }
+
+@router.delete("/{student_id}")
+async def delete_student(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Delete a student. Admin only.
+    Automatically deletes their associated User record (student login)
+    and removes them from Supabase Auth as well.
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can delete students")
+
+    from app.db.models import Student, User
+    from app.core.config import settings
+    from supabase import create_client as _cc
+
+    result = await db.execute(
+        select(Student).where(Student.id == student_id)
+    )
+    student = result.scalars().first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    user_id_to_delete = student.user_id
+
+    # 1. Delete from Supabase Auth if service key is configured
+    if user_id_to_delete and settings.SUPABASE_SERVICE_KEY:
+        try:
+            print(f"[DELETE-STUDENT] Deleting user {user_id_to_delete} from Supabase Auth...")
+            admin_client = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+            admin_client.auth.admin.delete_user(str(user_id_to_delete))
+            print(f"[DELETE-STUDENT] Deleted user successfully from Supabase.")
+        except Exception as e:
+            print(f"[DELETE-STUDENT] Supabase delete user failed: {e}")
+
+    # 2. Delete Student profile (cascades points, quiz attempts, attendance records, enrollments)
+    await db.delete(student)
+    
+    # 3. Delete the associated User login record if it exists
+    if user_id_to_delete:
+        user_res = await db.execute(select(User).where(User.id == user_id_to_delete))
+        db_user = user_res.scalars().first()
+        if db_user:
+            await db.delete(db_user)
+
+    await db.commit()
+    return {"message": "Student and their login account deleted successfully"}

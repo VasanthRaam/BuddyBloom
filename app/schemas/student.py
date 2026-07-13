@@ -12,9 +12,15 @@ class StudentCreate(StudentBase):
     parent_id: UUID
     user_id: Optional[UUID] = None
 
-class StudentUpdate(StudentBase):
+class StudentUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    mother_name: Optional[str] = None
+    father_name: Optional[str] = None
+    parent_phone_number: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 class StudentResponse(StudentBase):
     id: UUID

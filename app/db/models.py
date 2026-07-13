@@ -360,6 +360,7 @@ class ChatMessage(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String, nullable=False)  # "user" or "model"
     content = Column(Text, nullable=False)
+    mode = Column(String, default="general", server_default="general", nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     user = relationship("User", backref="chat_messages")

@@ -30,6 +30,21 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
         ]
 
     async def dispatch(self, request: Request, call_next):
+        # Helper to return JSONResponse with CORS headers
+        def make_error_response(status_code: int, detail: str):
+            headers = {}
+            origin = request.headers.get("origin")
+            if origin:
+                headers["Access-Control-Allow-Origin"] = origin
+                headers["Access-Control-Allow-Credentials"] = "true"
+            headers["Access-Control-Allow-Headers"] = "*"
+            headers["Access-Control-Allow-Methods"] = "*"
+            return JSONResponse(
+                status_code=status_code,
+                content={"detail": detail},
+                headers=headers
+            )
+
         # 1. Skip validation for excluded paths and OPTIONS requests
         path = request.url.path
         if request.method == "OPTIONS":
@@ -46,9 +61,9 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
         # 2. Extract token from Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            return JSONResponse(
+            return make_error_response(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Missing or invalid Authorization header"}
+                detail="Missing or invalid Authorization header"
             )
 
         token = auth_header.split(" ")[1]
@@ -82,9 +97,13 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
             
         except Exception as e:
             # 5. Reject unauthorized requests
-            return JSONResponse(
+            detail_msg = str(e) if hasattr(e, "detail") else "Invalid or expired token"
+            # Extract actual detail if it's an HTTPException
+            if hasattr(e, "detail"):
+                detail_msg = e.detail
+            return make_error_response(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": str(e) if hasattr(e, "detail") else "Invalid or expired token"}
+                detail=detail_msg
             )
 
         # Proceed to the actual route

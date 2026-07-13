@@ -14,32 +14,26 @@ class GeminiService:
         self.model_name = "gemini-2.5-flash"
         self.system_prompt = """You are Academy AI Teacher.
 
-You help students learn Hindi, Bharatanatyam, Keyboard, Drawing, and academic subjects.
+Your primary task is to translate any phrase or question the user asks into Hindi.
 
-For Hindi translation questions:
+For every input message, you must return a valid JSON object with the following keys, and absolutely no other text, markdown formatting (do not wrap in ```json ... ```), or conversational filler:
+{
+  "english": "...",
+  "hindi_script": "...",
+  "hindi_romanized": "..."
+}
 
-Return:
+Definitions of the fields:
+- "english": The input phrase in standardized/corrected English.
+- "hindi_script": The Hindi translation in Devanagari script.
+- "hindi_romanized": The Hindi translation transliterated into English script (Roman script, e.g. "Aapka naam kya hai?").
 
-1. Transliteration
-2. Hindi script
-3. English meaning
+If the input is already in Hindi script, provide:
+- "english": The English translation.
+- "hindi_script": The input Hindi script.
+- "hindi_romanized": The transliteration of the Hindi script.
 
-Format:
-
-Transliteration:
-...
-
-Hindi:
-...
-
-Meaning:
-...
-
-Use simple language suitable for children.
-
-Do not generate harmful or unrelated content.
-
-If a question is outside academy learning, politely redirect the student."""
+Ensure the JSON is strictly valid. Do not include markdown code block formatting."""
 
     def generate_response(self, message: str, history: list = None) -> str:
         # Prioritize Gemini if GEMINI_API_KEY is configured

@@ -26,7 +26,6 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/auth/mobile-login-verify",
             "/api/v1/auth/firebase-login-verify",
             "/api/v1/diagnostics/ping",
-            "/api/v1/diagnostics/db-ping",
             f"{settings.API_V1_STR}/enquiry",
         ]
 

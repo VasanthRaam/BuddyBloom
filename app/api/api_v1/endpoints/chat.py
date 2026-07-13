@@ -69,12 +69,36 @@ async def chat_with_tutor(
         # 4. Call Gemini service with history
         reply = gemini_service.generate_response(request.message, history=history_list)
         
+        # Clean reply of any markdown code blocks
+        reply_clean = reply.strip()
+        if reply_clean.startswith("```json"):
+            reply_clean = reply_clean[7:]
+        elif reply_clean.startswith("```"):
+            reply_clean = reply_clean[3:]
+        if reply_clean.endswith("```"):
+            reply_clean = reply_clean[:-3]
+        reply_clean = reply_clean.strip()
+
+        # Validate JSON structure, fallback to simple wrapper if invalid
+        import json
+        try:
+            parsed_json = json.loads(reply_clean)
+            if not isinstance(parsed_json, dict) or "hindi_script" not in parsed_json:
+                raise ValueError("Missing keys")
+        except Exception:
+            fallback_obj = {
+                "english": request.message,
+                "hindi_script": reply_clean,
+                "hindi_romanized": ""
+            }
+            reply_clean = json.dumps(fallback_obj, ensure_ascii=False)
+
         # 5. Save the model reply to the database
-        bot_msg = ChatMessage(user_id=user_uuid, role="model", content=reply)
+        bot_msg = ChatMessage(user_id=user_uuid, role="model", content=reply_clean)
         db.add(bot_msg)
         await db.commit()
         
-        return ChatResponse(answer=reply)
+        return ChatResponse(answer=reply_clean)
     except HTTPException as e:
         raise e
     except Exception as e:

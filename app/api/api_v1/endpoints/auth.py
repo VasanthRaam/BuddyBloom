@@ -346,6 +346,7 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
     logger.info(f"[AUTH-LOGIN] Login successful for user ID={db_user.id}, role={db_user.role}")
     return {
         "access_token": response.session.access_token,
+        "refresh_token": response.session.refresh_token,
         "token_type": "bearer",
         "user": user_data,
     }
@@ -1039,7 +1040,7 @@ async def mobile_login_verify(request: MobileLoginVerifyRequest, db: AsyncSessio
         "sub": str(db_user.id),
         "role": _role_value(db_user.role),
         "email": db_user.email,
-        "exp": datetime.now(timezone.utc) + timedelta(days=7) # 7 days expiration
+        "exp": datetime.now(timezone.utc) + timedelta(days=365) # 365 days expiration
     }
     token = jose_jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
     
@@ -1173,7 +1174,7 @@ async def firebase_login_verify(request: FirebaseLoginVerifyRequest, db: AsyncSe
         "sub": str(db_user.id),
         "role": _role_value(db_user.role),
         "email": db_user.email,
-        "exp": datetime.now(timezone.utc) + timedelta(days=7)
+        "exp": datetime.now(timezone.utc) + timedelta(days=365)
     }
     token = jose_jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
     logger.info(f"[FIREBASE-LOGIN-VERIFY] Custom JWT generated successfully for user ID={db_user.id}")

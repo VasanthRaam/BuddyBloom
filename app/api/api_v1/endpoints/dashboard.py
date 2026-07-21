@@ -63,8 +63,14 @@ async def get_dashboard_stats(
         
     elif role == "student":
         from app.db.models import Attendance, AttendanceStatus
+        import uuid
+        try:
+            user_uuid = uuid.UUID(str(user_id))
+        except Exception:
+            user_uuid = user_id
+
         # Individual stats
-        st_res = await db.execute(select(Student).where(Student.user_id == user_id))
+        st_res = await db.execute(select(Student).where((Student.user_id == user_uuid) | (Student.id == user_uuid)))
         student = st_res.scalars().first()
         
         if student:

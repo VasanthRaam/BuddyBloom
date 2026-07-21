@@ -48,7 +48,11 @@ async def get_attendance(
     # Simple role-based data isolation
     if role == "student":
         from app.db.models import Student
-        res = await db.execute(select(Student).where(Student.user_id == current_user["id"]))
+        try:
+            user_uuid = UUID(str(current_user["id"]))
+        except Exception:
+            user_uuid = current_user["id"]
+        res = await db.execute(select(Student).where((Student.user_id == user_uuid) | (Student.id == user_uuid)))
         student = res.scalars().first()
         if student:
             student_id = student.id

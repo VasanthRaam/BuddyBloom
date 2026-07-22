@@ -100,7 +100,7 @@ async def get_student_summary(
 
     # ── 1. Look up the student profile ────────────────────────────────────────
     student_res = await db.execute(
-        select(Student).where(Student.user_id == user_id)
+        select(Student).where((Student.user_id == user_id) | (Student.id == user_id))
     )
     student = student_res.scalars().first()
 

@@ -29,26 +29,48 @@ async def get_dashboard_stats(
 
     try:
         if role == "admin":
-            # Revenue & Pending
-            rev_res = await db.execute(select(func.sum(FeePayment.amount)).where(FeePayment.status == "paid"))
-            revenue = rev_res.scalar() or 0.0
+            from app.db.models import Income, Student
+            # Revenue: paid fees + manual incomes
+            rev_fees_res = await db.execute(
+                select(func.sum(FeePayment.amount)).where(FeePayment.status.in_(["paid", "Paid", "PAID"]))
+            )
+            rev_fees = rev_fees_res.scalar() or 0.0
 
-            pend_res = await db.execute(select(func.sum(FeePayment.amount)).where(FeePayment.status == "pending"))
+            rev_inc_res = await db.execute(select(func.sum(Income.amount)))
+            rev_incomes = rev_inc_res.scalar() or 0.0
+
+            total_rev = float(rev_fees) + float(rev_incomes)
+
+            # Pending fees
+            pend_res = await db.execute(
+                select(func.sum(FeePayment.amount)).where(
+                    FeePayment.status.in_(["pending", "Pending", "PENDING", "unpaid", "Unpaid", "due", "DUE", "overdue", "OVERDUE"])
+                )
+            )
             pending = pend_res.scalar() or 0.0
 
-            # Count Students and Teachers safely matching Enum or String
-            stud_count = await db.execute(
+            # Count Students: check both Student profile table and User table with student role
+            st_profile_count_res = await db.execute(select(func.count(Student.id)))
+            st_profile_count = st_profile_count_res.scalar() or 0
+
+            st_user_count_res = await db.execute(
                 select(func.count(User.id)).where(User.role.in_([UserRole.student, "student", "STUDENT"]))
             )
-            teach_count = await db.execute(
+            st_user_count = st_user_count_res.scalar() or 0
+
+            total_studs = max(st_profile_count, st_user_count)
+
+            # Count Teachers
+            teach_count_res = await db.execute(
                 select(func.count(User.id)).where(User.role.in_([UserRole.teacher, "teacher", "TEACHER"]))
             )
+            total_teachers = teach_count_res.scalar() or 0
 
             response.admin = AdminStats(
-                total_revenue=float(revenue or 0.0),
-                pending_fees=float(pending or 0.0),
-                total_students=stud_count.scalar() or 0,
-                total_teachers=teach_count.scalar() or 0
+                total_revenue=float(total_rev),
+                pending_fees=float(pending),
+                total_students=int(total_studs),
+                total_teachers=int(total_teachers)
             )
 
         elif role == "teacher":

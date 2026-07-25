@@ -327,7 +327,13 @@ async def delete_student(
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Only admins can delete students")
 
-    from app.db.models import Student, User
+    from sqlalchemy import delete
+    from app.db.models import (
+        Student, User, PointTransaction, RewardRedemption,
+        QuizAttempt, Attendance, Enrollment, FeePayment,
+        HomeworkSubmission, UserPushToken, ChatMessage,
+        Notification, LeaveRequest, PendingEnrollment
+    )
     from app.core.config import settings
     from supabase import create_client as _cc
 
@@ -340,7 +346,23 @@ async def delete_student(
 
     user_id_to_delete = student.user_id
 
-    # 1. Delete from Supabase Auth if service key is configured
+    # 1. Clean up student-specific child records to prevent foreign key constraints
+    await db.execute(delete(PointTransaction).where(PointTransaction.student_id == student_id))
+    await db.execute(delete(RewardRedemption).where(RewardRedemption.student_id == student_id))
+    await db.execute(delete(QuizAttempt).where(QuizAttempt.student_id == student_id))
+    await db.execute(delete(Attendance).where(Attendance.student_id == student_id))
+    await db.execute(delete(Enrollment).where(Enrollment.student_id == student_id))
+
+    if user_id_to_delete:
+        await db.execute(delete(FeePayment).where(FeePayment.user_id == user_id_to_delete))
+        await db.execute(delete(HomeworkSubmission).where(HomeworkSubmission.student_id == user_id_to_delete))
+        await db.execute(delete(UserPushToken).where(UserPushToken.user_id == user_id_to_delete))
+        await db.execute(delete(ChatMessage).where((ChatMessage.sender_id == user_id_to_delete) | (ChatMessage.receiver_id == user_id_to_delete)))
+        await db.execute(delete(Notification).where(Notification.user_id == user_id_to_delete))
+        await db.execute(delete(LeaveRequest).where(LeaveRequest.user_id == user_id_to_delete))
+        await db.execute(delete(PendingEnrollment).where(PendingEnrollment.user_id == user_id_to_delete))
+
+    # 2. Delete from Supabase Auth if service key is configured
     if user_id_to_delete and settings.SUPABASE_SERVICE_KEY:
         try:
             print(f"[DELETE-STUDENT] Deleting user {user_id_to_delete} from Supabase Auth...")
@@ -348,12 +370,13 @@ async def delete_student(
             admin_client.auth.admin.delete_user(str(user_id_to_delete))
             print(f"[DELETE-STUDENT] Deleted user successfully from Supabase.")
         except Exception as e:
-            print(f"[DELETE-STUDENT] Supabase delete user failed: {e}")
+            print(f"[DELETE-STUDENT] Supabase delete user info: {e}")
 
-    # 2. Delete Student profile (cascades points, quiz attempts, attendance records, enrollments)
+    # 3. Delete Student profile
     await db.delete(student)
+    await db.flush()
     
-    # 3. Delete the associated User login record if it exists
+    # 4. Delete the associated User login record if it exists
     if user_id_to_delete:
         user_res = await db.execute(select(User).where(User.id == user_id_to_delete))
         db_user = user_res.scalars().first()

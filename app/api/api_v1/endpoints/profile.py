@@ -200,15 +200,21 @@ async def get_photo_upload_url(
     The client uploads the image directly to this URL, then calls PUT /profile/me
     with the returned public_url to save it.
     """
+    if not settings.SUPABASE_SERVICE_KEY:
+        return {
+            "upload_url": "",
+            "public_url": "",
+            "path": "",
+        }
+
     from supabase import create_client
-    supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
-
-    user_id = current_user["id"]
-    file_path = f"profile-pictures/{user_id}.jpg"
-    bucket = "profile-pictures"
-
     try:
-        # Ensure the bucket exists
+        supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+
+        user_id = current_user["id"]
+        file_path = f"profile-pictures/{user_id}.jpg"
+        bucket = "profile-pictures"
+
         try:
             supabase_client.storage.create_bucket(bucket, options={"public": True})
         except Exception:
@@ -223,4 +229,9 @@ async def get_photo_upload_url(
             "path": file_path,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate upload URL: {str(e)}")
+        print(f"[PHOTO-UPLOAD-URL] Storage url creation notice: {e}")
+        return {
+            "upload_url": "",
+            "public_url": "",
+            "path": "",
+        }

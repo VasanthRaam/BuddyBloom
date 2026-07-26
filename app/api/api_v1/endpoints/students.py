@@ -351,6 +351,7 @@ async def delete_student(
             raise HTTPException(status_code=404, detail="Student not found")
 
         user_id_to_delete = student.user_id
+        parent_id = student.parent_id
 
         # Fetch user email directly via SQL scalar to prevent lazy-load greenlet errors
         student_email = None
@@ -358,6 +359,7 @@ async def delete_student(
             u_res = await db.execute(select(User.email).where(User.id == user_id_to_delete))
             student_email = u_res.scalar()
 
+        # 2. Delete all child records that reference student_id
         await db.execute(delete(PointTransaction).where(PointTransaction.student_id == student_id))
         await db.execute(delete(RewardRedemption).where(RewardRedemption.student_id == student_id))
         await db.execute(delete(QuizAttempt).where(QuizAttempt.student_id == student_id))
@@ -366,23 +368,29 @@ async def delete_student(
         await db.execute(delete(LeaveRequest).where(LeaveRequest.student_id == student_id))
         await db.execute(delete(PendingEnrollment).where(PendingEnrollment.student_id == student_id))
 
+        # 3. Delete child records that reference user_id, and nullify FK references
         if user_id_to_delete:
             await db.execute(delete(FeePayment).where(FeePayment.user_id == user_id_to_delete))
             await db.execute(delete(HomeworkSubmission).where(HomeworkSubmission.student_id == user_id_to_delete))
             await db.execute(delete(UserPushToken).where(UserPushToken.user_id == user_id_to_delete))
             await db.execute(delete(ChatMessage).where(ChatMessage.user_id == user_id_to_delete))
             await db.execute(delete(Notification).where(Notification.user_id == user_id_to_delete))
-            
-            # Nullify references in Homework, PointTransaction, and Student parent_id
+            # Nullify any Homework or PointTransaction rows referencing this user
             await db.execute(update(Homework).where(Homework.student_id == user_id_to_delete).values(student_id=None))
             await db.execute(update(PointTransaction).where(PointTransaction.given_by == user_id_to_delete).values(given_by=None))
+            # Nullify parent_id on ANY other students referencing this user as their parent
             await db.execute(update(Student).where(Student.parent_id == user_id_to_delete).values(parent_id=None))
 
         if student_email:
             await db.execute(delete(PasswordResetOTP).where(PasswordResetOTP.email == student_email))
             await db.execute(delete(PendingRegistration).where(PendingRegistration.email == student_email))
 
-        # 3. Supabase Auth account removal
+        # 4. Delete the Student row FIRST (removes parent_id and user_id FK references)
+        await db.execute(delete(Student).where(Student.id == student_id))
+        # Flush to apply the student deletion before we try to delete the user
+        await db.flush()
+
+        # 5. Supabase Auth account removal (non-blocking — failures are logged, not raised)
         if user_id_to_delete and settings.SUPABASE_SERVICE_KEY:
             try:
                 admin_client = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
@@ -391,9 +399,7 @@ async def delete_student(
             except Exception as e:
                 logger.info(f"[DELETE-STUDENT] Supabase delete user info: {e}")
 
-        # 4. Direct SQL delete for Student and User records (prevents ORM relationship lazy-loading greenlet errors)
-        await db.execute(delete(Student).where(Student.id == student_id))
-        
+        # 6. Now it is safe to delete the User row (no more Student rows reference it)
         if user_id_to_delete:
             await db.execute(delete(User).where(User.id == user_id_to_delete))
 

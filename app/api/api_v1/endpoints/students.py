@@ -328,7 +328,6 @@ async def delete_student(
         raise HTTPException(status_code=403, detail="Only admins can delete students")
 
     import logging
-    import traceback
     from sqlalchemy import delete, update
     from app.db.models import (
         Student, User, PointTransaction, RewardRedemption,
@@ -343,6 +342,7 @@ async def delete_student(
     logger = logging.getLogger("app.api.students")
 
     try:
+        # 1. Fetch student record
         result = await db.execute(
             select(Student).where(Student.id == student_id)
         )
@@ -351,9 +351,14 @@ async def delete_student(
             raise HTTPException(status_code=404, detail="Student not found")
 
         user_id_to_delete = student.user_id
-        student_email = student.user.email if student.user else None
 
-        # 1. Clean up student-specific child records
+        # Fetch user email directly via SQL scalar to prevent lazy-load greenlet errors
+        student_email = None
+        if user_id_to_delete:
+            u_res = await db.execute(select(User.email).where(User.id == user_id_to_delete))
+            student_email = u_res.scalar()
+
+        # 2. Clean up student-specific child records via direct SQL deletes
         await db.execute(delete(PointTransaction).where(PointTransaction.student_id == student_id))
         await db.execute(delete(RewardRedemption).where(RewardRedemption.student_id == student_id))
         await db.execute(delete(QuizAttempt).where(QuizAttempt.student_id == student_id))
@@ -369,40 +374,29 @@ async def delete_student(
             await db.execute(delete(LeaveRequest).where(LeaveRequest.user_id == user_id_to_delete))
             await db.execute(delete(PendingEnrollment).where(PendingEnrollment.user_id == user_id_to_delete))
             
-            # Nullify references in Homework and PointTransaction
+            # Nullify references in Homework, PointTransaction, and Student parent_id
             await db.execute(update(Homework).where(Homework.student_id == user_id_to_delete).values(student_id=None))
             await db.execute(update(PointTransaction).where(PointTransaction.given_by == user_id_to_delete).values(given_by=None))
+            await db.execute(update(Student).where(Student.parent_id == user_id_to_delete).values(parent_id=None))
 
         if student_email:
             await db.execute(delete(PasswordResetOTP).where(PasswordResetOTP.email == student_email))
             await db.execute(delete(PendingRegistration).where(PendingRegistration.email == student_email))
 
-        # 2. Delete from Supabase Auth if service key is configured
+        # 3. Supabase Auth account removal
         if user_id_to_delete and settings.SUPABASE_SERVICE_KEY:
             try:
-                print(f"[DELETE-STUDENT] Deleting user {user_id_to_delete} from Supabase Auth...")
                 admin_client = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
                 admin_client.auth.admin.delete_user(str(user_id_to_delete))
-                print(f"[DELETE-STUDENT] Deleted user successfully from Supabase.")
+                logger.info(f"[DELETE-STUDENT] Deleted user {user_id_to_delete} from Supabase Auth.")
             except Exception as e:
-                print(f"[DELETE-STUDENT] Supabase delete user info: {e}")
+                logger.info(f"[DELETE-STUDENT] Supabase delete user info: {e}")
 
-        # 3. Disassociate user_id and parent_id on Student profile before deleting
-        student.user_id = None
-        await db.flush()
-
-        await db.delete(student)
-        await db.flush()
+        # 4. Direct SQL delete for Student and User records (prevents ORM relationship lazy-loading greenlet errors)
+        await db.execute(delete(Student).where(Student.id == student_id))
         
-        # 4. Delete the associated User login record if it exists
         if user_id_to_delete:
-            # Nullify any parent references pointing to this user
-            await db.execute(update(Student).where(Student.parent_id == user_id_to_delete).values(parent_id=None))
-            
-            user_res = await db.execute(select(User).where(User.id == user_id_to_delete))
-            db_user = user_res.scalars().first()
-            if db_user:
-                await db.delete(db_user)
+            await db.execute(delete(User).where(User.id == user_id_to_delete))
 
         await db.commit()
         return {"message": "Student and their login account deleted successfully"}

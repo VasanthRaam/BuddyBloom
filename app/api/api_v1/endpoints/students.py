@@ -369,7 +369,7 @@ async def delete_student(
             await db.execute(delete(FeePayment).where(FeePayment.user_id == user_id_to_delete))
             await db.execute(delete(HomeworkSubmission).where(HomeworkSubmission.student_id == user_id_to_delete))
             await db.execute(delete(UserPushToken).where(UserPushToken.user_id == user_id_to_delete))
-            await db.execute(delete(ChatMessage).where((ChatMessage.sender_id == user_id_to_delete) | (ChatMessage.receiver_id == user_id_to_delete)))
+            await db.execute(delete(ChatMessage).where(ChatMessage.user_id == user_id_to_delete))
             await db.execute(delete(Notification).where(Notification.user_id == user_id_to_delete))
             await db.execute(delete(LeaveRequest).where(LeaveRequest.user_id == user_id_to_delete))
             await db.execute(delete(PendingEnrollment).where(PendingEnrollment.user_id == user_id_to_delete))

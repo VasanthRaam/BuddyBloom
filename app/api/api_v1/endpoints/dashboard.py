@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case, cast, Float
+from sqlalchemy import select, func, case, cast, Float, or_
 import uuid
 import logging
 from app.db.database import get_db
@@ -19,56 +19,60 @@ async def get_dashboard_stats(
 ):
     raw_role = str(current_user.get("role") or "").lower()
     raw_user_id = current_user.get("id")
-    
+
     try:
         user_id = uuid.UUID(str(raw_user_id)) if raw_user_id else None
     except Exception:
-        user_id = raw_user_id
+        user_id = None
 
     response = DashboardStatsResponse()
 
-    try:
-        is_admin = "admin" in raw_role
-        is_teacher = "teacher" in raw_role
-        is_student = "student" in raw_role
-        is_parent = "parent" in raw_role
+    is_admin = "admin" in raw_role
+    is_teacher = "teacher" in raw_role
+    is_student = "student" in raw_role
+    is_parent = "parent" in raw_role
 
-        # ── 1. ADMIN STATS (Computed if Admin OR fallback) ────────────────────
-        if is_admin:
-            from app.db.models import Income, Student
-            # Revenue: paid fees + manual incomes
+    # ── 1. ADMIN STATS ────────────────────────────────────────────────────────
+    if is_admin:
+        try:
+            from app.db.models import Income
+
+            # Revenue: paid fee payments (case-insensitive)
             rev_fees_res = await db.execute(
-                select(func.sum(FeePayment.amount)).where(FeePayment.status.in_(["paid", "Paid", "PAID"]))
+                select(func.sum(FeePayment.amount)).where(
+                    or_(
+                        FeePayment.status.ilike("paid"),
+                    )
+                )
             )
             rev_fees = rev_fees_res.scalar() or 0.0
 
+            # Revenue: manual incomes
             rev_inc_res = await db.execute(select(func.sum(Income.amount)))
             rev_incomes = rev_inc_res.scalar() or 0.0
 
             total_rev = float(rev_fees) + float(rev_incomes)
 
-            # Pending fees
+            # Pending/unpaid fees (case-insensitive)
             pend_res = await db.execute(
                 select(func.sum(FeePayment.amount)).where(
-                    FeePayment.status.in_(["pending", "Pending", "PENDING", "unpaid", "Unpaid", "due", "DUE", "overdue", "OVERDUE"])
+                    or_(
+                        FeePayment.status.ilike("pending"),
+                        FeePayment.status.ilike("unpaid"),
+                        FeePayment.status.ilike("due"),
+                        FeePayment.status.ilike("overdue"),
+                    )
                 )
             )
             pending = pend_res.scalar() or 0.0
 
-            # Count Students: check both Student profile table and User table with student role
-            st_profile_count_res = await db.execute(select(func.count(Student.id)))
-            st_profile_count = st_profile_count_res.scalar() or 0
-
-            st_user_count_res = await db.execute(
-                select(func.count(User.id)).where(User.role.in_([UserRole.student, "student", "STUDENT", "UserRole.student"]))
-            )
-            st_user_count = st_user_count_res.scalar() or 0
-
-            total_studs = max(st_profile_count, st_user_count)
+            # Count Students from Student profile table
+            st_count_res = await db.execute(select(func.count(Student.id)))
+            total_studs = st_count_res.scalar() or 0
 
             # Count Teachers
             teach_count_res = await db.execute(
-                select(func.count(User.id)).where(User.role.in_([UserRole.teacher, "teacher", "TEACHER", "UserRole.teacher"]))
+                select(func.count(User.id)).where(User.role == UserRole.teacher)
             )
             total_teachers = teach_count_res.scalar() or 0
 
@@ -78,12 +82,19 @@ async def get_dashboard_stats(
                 total_students=int(total_studs),
                 total_teachers=int(total_teachers)
             )
+            logger.info(f"[DASHBOARD-STATS] Admin stats computed: revenue={total_rev}, students={total_studs}, teachers={total_teachers}")
+        except Exception as e:
+            logger.error(f"[DASHBOARD-STATS] Admin stats failed for user_id={raw_user_id}: {e}", exc_info=True)
 
-        # ── 2. TEACHER STATS ──────────────────────────────────────────────────
-        if is_teacher or is_admin:
+    # ── 2. TEACHER STATS ──────────────────────────────────────────────────────
+    if is_teacher or is_admin:
+        try:
             from app.db.models import Quiz
 
             avg_perf = 0.0
+            batches_count = 0
+            hw_count = 0
+
             if user_id:
                 perf_res = await db.execute(
                     select(
@@ -93,32 +104,40 @@ async def get_dashboard_stats(
                                 else_=0
                             )
                         )
-                    ).join(Quiz, Quiz.id == QuizAttempt.quiz_id).where((Quiz.created_by == user_id) | (Quiz.created_by == str(raw_user_id)))
+                    ).join(Quiz, Quiz.id == QuizAttempt.quiz_id).where(Quiz.created_by == user_id)
                 )
                 avg_perf = perf_res.scalar() or 0.0
 
-            batches_count = 0
-            hw_count = 0
-            if user_id:
-                b_res = await db.execute(select(func.count(Batch.id)).where((Batch.teacher_id == user_id) | (Batch.teacher_id == str(raw_user_id))))
+                b_res = await db.execute(
+                    select(func.count(Batch.id)).where(Batch.teacher_id == user_id)
+                )
                 batches_count = b_res.scalar() or 0
 
-                hw_res = await db.execute(select(func.count(Homework.id)).where((Homework.teacher_id == user_id) | (Homework.teacher_id == str(raw_user_id))))
+                hw_res = await db.execute(
+                    select(func.count(Homework.id)).where(Homework.teacher_id == user_id)
+                )
                 hw_count = hw_res.scalar() or 0
 
             response.teacher = TeacherStats(
                 avg_performance=round(float(avg_perf or 0.0) * 100, 1),
-                active_batches=batches_count,
-                pending_homeworks=hw_count
+                active_batches=int(batches_count),
+                pending_homeworks=int(hw_count)
             )
+        except Exception as e:
+            logger.error(f"[DASHBOARD-STATS] Teacher stats failed for user_id={raw_user_id}: {e}", exc_info=True)
 
-        # ── 3. STUDENT / PARENT STATS ─────────────────────────────────────────
-        if is_student or is_parent or is_admin:
+    # ── 3. STUDENT / PARENT STATS ─────────────────────────────────────────────
+    if is_student or is_parent:
+        try:
             from app.db.models import Attendance, AttendanceStatus
 
             student = None
             if user_id:
-                st_res = await db.execute(select(Student).where((Student.user_id == user_id) | (Student.id == user_id)))
+                st_res = await db.execute(
+                    select(Student).where(
+                        or_(Student.user_id == user_id, Student.id == user_id)
+                    )
+                )
                 student = st_res.scalars().first()
 
             if student:
@@ -137,12 +156,13 @@ async def get_dashboard_stats(
                 avg_score = row[0] if row else 0
                 count = row[1] if row else 0
 
-                total_att = await db.execute(select(func.count(Attendance.id)).where(Attendance.student_id == student.id))
+                total_att = await db.execute(
+                    select(func.count(Attendance.id)).where(Attendance.student_id == student.id)
+                )
                 present_att = await db.execute(
-                    select(func.count(Attendance.id))
-                    .where(
+                    select(func.count(Attendance.id)).where(
                         Attendance.student_id == student.id,
-                        Attendance.status.in_([AttendanceStatus.present, 'present', 'Present', 'PRESENT'])
+                        Attendance.status == AttendanceStatus.present
                     )
                 )
                 total_count = total_att.scalar() or 0
@@ -152,7 +172,7 @@ async def get_dashboard_stats(
                 response.student = StudentStats(
                     attendance_rate=round(float(attendance_rate or 0.0), 1),
                     avg_quiz_score=round(float(avg_score or 0.0) * 100, 1),
-                    completed_quizzes=count or 0
+                    completed_quizzes=int(count or 0)
                 )
             else:
                 response.student = StudentStats(
@@ -160,8 +180,7 @@ async def get_dashboard_stats(
                     avg_quiz_score=0.0,
                     completed_quizzes=0
                 )
-
-    except Exception as e:
-        logger.error(f"[DASHBOARD-STATS] Failed to compute stats for user_id={raw_user_id}, role={raw_role}: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"[DASHBOARD-STATS] Student/parent stats failed for user_id={raw_user_id}: {e}", exc_info=True)
 
     return response

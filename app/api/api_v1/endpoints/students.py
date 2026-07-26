@@ -358,12 +358,13 @@ async def delete_student(
             u_res = await db.execute(select(User.email).where(User.id == user_id_to_delete))
             student_email = u_res.scalar()
 
-        # 2. Clean up student-specific child records via direct SQL deletes
         await db.execute(delete(PointTransaction).where(PointTransaction.student_id == student_id))
         await db.execute(delete(RewardRedemption).where(RewardRedemption.student_id == student_id))
         await db.execute(delete(QuizAttempt).where(QuizAttempt.student_id == student_id))
         await db.execute(delete(Attendance).where(Attendance.student_id == student_id))
         await db.execute(delete(Enrollment).where(Enrollment.student_id == student_id))
+        await db.execute(delete(LeaveRequest).where(LeaveRequest.student_id == student_id))
+        await db.execute(delete(PendingEnrollment).where(PendingEnrollment.student_id == student_id))
 
         if user_id_to_delete:
             await db.execute(delete(FeePayment).where(FeePayment.user_id == user_id_to_delete))
@@ -371,8 +372,6 @@ async def delete_student(
             await db.execute(delete(UserPushToken).where(UserPushToken.user_id == user_id_to_delete))
             await db.execute(delete(ChatMessage).where(ChatMessage.user_id == user_id_to_delete))
             await db.execute(delete(Notification).where(Notification.user_id == user_id_to_delete))
-            await db.execute(delete(LeaveRequest).where(LeaveRequest.user_id == user_id_to_delete))
-            await db.execute(delete(PendingEnrollment).where(PendingEnrollment.user_id == user_id_to_delete))
             
             # Nullify references in Homework, PointTransaction, and Student parent_id
             await db.execute(update(Homework).where(Homework.student_id == user_id_to_delete).values(student_id=None))

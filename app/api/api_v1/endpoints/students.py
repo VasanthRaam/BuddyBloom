@@ -334,7 +334,8 @@ async def delete_student(
         QuizAttempt, Attendance, Enrollment, FeePayment,
         HomeworkSubmission, Homework, UserPushToken, ChatMessage,
         Notification, LeaveRequest, PendingEnrollment,
-        PasswordResetOTP, MobileLoginOTP, PendingRegistration
+        PasswordResetOTP, MobileLoginOTP, PendingRegistration,
+        ProgressTracking
     )
     from app.core.config import settings
     from supabase import create_client as _cc
@@ -360,6 +361,7 @@ async def delete_student(
             student_email = u_res.scalar()
 
         # 2. Delete all child records that reference student_id
+        await db.execute(delete(ProgressTracking).where(ProgressTracking.student_id == student_id))
         await db.execute(delete(PointTransaction).where(PointTransaction.student_id == student_id))
         await db.execute(delete(RewardRedemption).where(RewardRedemption.student_id == student_id))
         await db.execute(delete(QuizAttempt).where(QuizAttempt.student_id == student_id))
@@ -368,18 +370,33 @@ async def delete_student(
         await db.execute(delete(LeaveRequest).where(LeaveRequest.student_id == student_id))
         await db.execute(delete(PendingEnrollment).where(PendingEnrollment.student_id == student_id))
 
-        # 3. Delete child records that reference user_id, and nullify FK references
+        # 3. Delete child records that reference user_id
         if user_id_to_delete:
             await db.execute(delete(FeePayment).where(FeePayment.user_id == user_id_to_delete))
             await db.execute(delete(HomeworkSubmission).where(HomeworkSubmission.student_id == user_id_to_delete))
             await db.execute(delete(UserPushToken).where(UserPushToken.user_id == user_id_to_delete))
             await db.execute(delete(ChatMessage).where(ChatMessage.user_id == user_id_to_delete))
             await db.execute(delete(Notification).where(Notification.user_id == user_id_to_delete))
-            # Nullify any Homework or PointTransaction rows referencing this user
+            # Nullify Homework/PointTransaction rows that soft-reference this user
             await db.execute(update(Homework).where(Homework.student_id == user_id_to_delete).values(student_id=None))
             await db.execute(update(PointTransaction).where(PointTransaction.given_by == user_id_to_delete).values(given_by=None))
-            # Nullify parent_id on ANY other students referencing this user as their parent
-            await db.execute(update(Student).where(Student.parent_id == user_id_to_delete).values(parent_id=None))
+            # parent_id is NOT NULL — delete any other student records that reference this user as parent
+            # (fetch their IDs first so we can cascade-delete their children too)
+            orphan_res = await db.execute(
+                select(Student.id).where(Student.parent_id == user_id_to_delete, Student.id != student_id)
+            )
+            orphan_ids = [row[0] for row in orphan_res.fetchall()]
+            if orphan_ids:
+                await db.execute(delete(ProgressTracking).where(ProgressTracking.student_id.in_(orphan_ids)))
+                await db.execute(delete(PointTransaction).where(PointTransaction.student_id.in_(orphan_ids)))
+                await db.execute(delete(RewardRedemption).where(RewardRedemption.student_id.in_(orphan_ids)))
+                await db.execute(delete(QuizAttempt).where(QuizAttempt.student_id.in_(orphan_ids)))
+                await db.execute(delete(Attendance).where(Attendance.student_id.in_(orphan_ids)))
+                await db.execute(delete(Enrollment).where(Enrollment.student_id.in_(orphan_ids)))
+                await db.execute(delete(LeaveRequest).where(LeaveRequest.student_id.in_(orphan_ids)))
+                await db.execute(delete(PendingEnrollment).where(PendingEnrollment.student_id.in_(orphan_ids)))
+                await db.execute(delete(Student).where(Student.id.in_(orphan_ids)))
+                logger.info(f"[DELETE-STUDENT] Also deleted {len(orphan_ids)} orphaned student(s) sharing same parent.")
 
         if student_email:
             await db.execute(delete(PasswordResetOTP).where(PasswordResetOTP.email == student_email))

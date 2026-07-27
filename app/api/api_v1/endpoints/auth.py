@@ -874,10 +874,85 @@ async def reset_password(request: ResetPasswordRequest, db: AsyncSession = Depen
     
     return {"message": "Password has been successfully reset. You can now log in."}
 
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(verify_token),
+):
+    """
+    Authenticated endpoint: change the logged-in user's own password.
+
+    Requires:
+      - current_password  — verified against Supabase (prevents unauthorized changes)
+      - new_password      — min 6 characters
+
+    Only works for email/password users. Google-only users will get a 400.
+    """
+    from sqlalchemy import func
+    from supabase import create_client as _cc
+
+    user_id_str = current_user.get("sub") or current_user.get("id")
+    if not user_id_str:
+        raise HTTPException(status_code=401, detail="Invalid token.")
+
+    if len(request.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters.")
+
+    if request.current_password == request.new_password:
+        raise HTTPException(status_code=400, detail="New password must be different from the current password.")
+
+    # 1. Fetch the user's email from DB
+    user_res = await db.execute(
+        select(User).where(User.id == user_id_str)
+    )
+    db_user = user_res.scalars().first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    # 2. Verify the current password by attempting a Supabase sign-in
+    try:
+        supabase.auth.sign_in_with_password({
+            "email": db_user.email,
+            "password": request.current_password,
+        })
+        supabase.auth.sign_out()
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Current password is incorrect."
+        )
+
+    # 3. Update the password via Supabase Admin API
+    if not settings.SUPABASE_SERVICE_KEY:
+        raise HTTPException(status_code=500, detail="Service key not configured.")
+
+    admin_client = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+    try:
+        admin_client.auth.admin.update_user_by_id(str(db_user.id), {"password": request.new_password})
+    except Exception as e:
+        logger.error(f"[CHANGE-PASSWORD] Supabase update failed for user {db_user.id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail="Could not update password. This account may use Google sign-in instead of email/password."
+        )
+
+    logger.info(f"[CHANGE-PASSWORD] Password changed for user {db_user.id} ({db_user.email})")
+    return {"message": "Password updated successfully."}
+
+
+
 class MobileLoginInitRequest(BaseModel):
     phone: str
 
 class MobileLoginVerifyRequest(BaseModel):
+
     phone: str
     otp: str
     selected_profile_id: str | None = None

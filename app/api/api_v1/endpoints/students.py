@@ -313,7 +313,211 @@ async def update_student(
         "parent_phone_number": student.parent_phone_number
     }
 
+# ── Admin: Manually Create Student with Login Credentials ─────────────────────
+
+from pydantic import BaseModel as _BM, EmailStr as _ES
+from typing import Optional as _Opt, List as _Lst
+import uuid as _uuid_mod
+
+
+class AdminCreateStudentRequest(_BM):
+    first_name: str
+    last_name: str
+    email: _ES
+    password: str
+    phone: _Opt[str] = None
+    date_of_birth: _Opt[str] = None
+    mother_name: _Opt[str] = None
+    father_name: _Opt[str] = None
+    parent_phone_number: _Opt[str] = None
+    batch_ids: _Opt[_Lst[_uuid_mod.UUID]] = []
+
+
+@router.post("/admin-create")
+async def admin_create_student(
+    body: AdminCreateStudentRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Admin-only: Create a student account with full login credentials.
+
+    Immediately creates the Supabase Auth account (email_confirm=True so no
+    email verification needed) and all DB records. The student can log in
+    right away and change their password from the Profile screen.
+
+    Returns: { student_id, user_id, email, message }
+    """
+    import logging
+    import uuid as _uuid
+    import datetime
+    from sqlalchemy import func
+    from app.db.models import (
+        Student, User, UserRole, Enrollment, Batch,
+        PasswordResetOTP, PendingRegistration
+    )
+    from app.core.config import settings
+    from supabase import create_client as _cc
+
+    logger = logging.getLogger("app.api.students")
+
+    # ── 1. Admin guard ────────────────────────────────────────────────────────
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can create student accounts directly.")
+
+    # ── 2. Basic input validation ─────────────────────────────────────────────
+    if not body.first_name.strip() or not body.last_name.strip():
+        raise HTTPException(status_code=400, detail="First name and last name are required.")
+
+    if len(body.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+
+    try:
+        # ── 3. Check email uniqueness in our DB ───────────────────────────────
+        existing_user = await db.execute(
+            select(User).where(func.lower(User.email) == func.lower(body.email))
+        )
+        if existing_user.scalars().first():
+            raise HTTPException(
+                status_code=409,
+                detail=f"A user with the email '{body.email}' already exists."
+            )
+
+        existing_pending = await db.execute(
+            select(PendingRegistration).where(
+                func.lower(PendingRegistration.email) == func.lower(body.email),
+                PendingRegistration.status == "pending"
+            )
+        )
+        if existing_pending.scalars().first():
+            raise HTTPException(
+                status_code=409,
+                detail=f"A pending registration for '{body.email}' already exists."
+            )
+
+        # ── 4. Validate batch_ids if provided ─────────────────────────────────
+        if body.batch_ids:
+            b_res = await db.execute(
+                select(Batch.id).where(Batch.id.in_(body.batch_ids))
+            )
+            found_batches = b_res.scalars().all()
+            if len(found_batches) != len(body.batch_ids):
+                raise HTTPException(status_code=400, detail="One or more selected batches are invalid.")
+
+        # ── 5. Create Supabase Auth user (admin API — no email verification) ──
+        if not settings.SUPABASE_SERVICE_KEY:
+            raise HTTPException(
+                status_code=500,
+                detail="Supabase service key is not configured. Cannot create auth account."
+            )
+
+        admin_supabase = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+        supabase_user_id = None
+
+        try:
+            auth_response = admin_supabase.auth.admin.create_user({
+                "email": body.email,
+                "password": body.password,
+                "email_confirm": True,   # skip email confirmation
+            })
+            supabase_user_id = auth_response.user.id
+            logger.info(f"[ADMIN-CREATE-STUDENT] Created Supabase user {supabase_user_id} for {body.email}")
+        except Exception as supa_err:
+            err_str = str(supa_err).lower()
+            if any(k in err_str for k in ["already exists", "already registered", "already been registered"]):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"An account with email '{body.email}' already exists in the authentication system."
+                )
+            logger.error(f"[ADMIN-CREATE-STUDENT] Supabase user creation failed: {supa_err}", exc_info=True)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to create authentication account: {str(supa_err)}"
+            )
+
+        # ── 6. Parse date_of_birth ─────────────────────────────────────────────
+        parsed_dob = None
+        if body.date_of_birth:
+            try:
+                parsed_dob = datetime.datetime.strptime(body.date_of_birth, "%Y-%m-%d").date()
+            except ValueError:
+                pass  # silently ignore invalid DOB — non-critical
+
+        # ── 7. Create local User record ────────────────────────────────────────
+        new_user = User(
+            id=supabase_user_id,
+            full_name=f"{body.first_name.strip()} {body.last_name.strip()}",
+            email=body.email.lower().strip(),
+            phone=body.phone,
+            role=UserRole.student,
+            is_approved=True,
+            dob=parsed_dob,
+        )
+        db.add(new_user)
+        await db.flush()  # get new_user.id into session
+
+        # ── 8. Create Student profile ──────────────────────────────────────────
+        new_student = Student(
+            id=_uuid.uuid4(),
+            user_id=new_user.id,
+            parent_id=new_user.id,   # self-referencing parent (same as approval flow)
+            first_name=body.first_name.strip(),
+            last_name=body.last_name.strip(),
+            date_of_birth=parsed_dob,
+            mother_name=body.mother_name,
+            father_name=body.father_name,
+            parent_phone_number=body.parent_phone_number,
+        )
+        db.add(new_student)
+        await db.flush()
+
+        # ── 9. Enroll in batches if provided ──────────────────────────────────
+        if body.batch_ids:
+            for b_id in body.batch_ids:
+                enrollment = Enrollment(
+                    id=_uuid.uuid4(),
+                    student_id=new_student.id,
+                    batch_id=b_id,
+                )
+                db.add(enrollment)
+
+        await db.commit()
+        logger.info(
+            f"[ADMIN-CREATE-STUDENT] Successfully created student {new_student.id} "
+            f"(user {new_user.id}) for {body.email}"
+        )
+
+        return {
+            "message": "Student account created successfully. The student can log in with the provided credentials.",
+            "student_id": str(new_student.id),
+            "user_id": str(new_user.id),
+            "email": new_user.email,
+            "full_name": new_user.full_name,
+        }
+
+    except HTTPException:
+        await db.rollback()
+        # If Supabase user was already created but DB insert failed, clean it up
+        if 'supabase_user_id' in dir() and supabase_user_id:
+            try:
+                admin_supabase.auth.admin.delete_user(str(supabase_user_id))
+                logger.info(f"[ADMIN-CREATE-STUDENT] Cleaned up orphaned Supabase user {supabase_user_id}")
+            except Exception as cleanup_err:
+                logger.warning(f"[ADMIN-CREATE-STUDENT] Failed to clean up Supabase user: {cleanup_err}")
+        raise
+    except Exception as exc:
+        await db.rollback()
+        if 'supabase_user_id' in dir() and supabase_user_id:
+            try:
+                admin_supabase.auth.admin.delete_user(str(supabase_user_id))
+                logger.info(f"[ADMIN-CREATE-STUDENT] Cleaned up orphaned Supabase user {supabase_user_id}")
+            except Exception as cleanup_err:
+                logger.warning(f"[ADMIN-CREATE-STUDENT] Failed to clean up Supabase user: {cleanup_err}")
+        logger.error(f"[ADMIN-CREATE-STUDENT] Unexpected error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create student: {str(exc)}")
+
 @router.delete("/{student_id}")
+
 async def delete_student(
     student_id: UUID,
     db: AsyncSession = Depends(get_db),

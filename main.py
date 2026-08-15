@@ -41,6 +41,8 @@ app.add_middleware(
         "http://localhost:8081",
         "http://localhost:19006",
         "http://localhost:19000",
+        "http://localhost:9090",
+        "http://127.0.0.1:9090",
         "https://buddybloom.onrender.com",
         "https://buddybloom-dev.onrender.com",
         "https://vasanthacademy.com",
@@ -48,6 +50,7 @@ app.add_middleware(
         "https://buddybloom-prod-981707949514.asia-south1.run.app",
         "https://buddybloom-dev-981707949514.asia-south1.run.app"
     ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

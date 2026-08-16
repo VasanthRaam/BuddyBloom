@@ -37,8 +37,8 @@ class SupabaseAuthMiddleware(BaseHTTPMiddleware):
             if origin:
                 headers["Access-Control-Allow-Origin"] = origin
                 headers["Access-Control-Allow-Credentials"] = "true"
-            headers["Access-Control-Allow-Headers"] = "*"
-            headers["Access-Control-Allow-Methods"] = "*"
+            headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept, Origin, X-Requested-With, Cache-Control, Pragma, Expires"
+            headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
             return JSONResponse(
                 status_code=status_code,
                 content={"detail": detail},

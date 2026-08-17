@@ -948,14 +948,40 @@ async def change_password(
 
 
 
+try:
+    from pydantic import root_validator
+except ImportError:
+    from pydantic import model_validator as root_validator
+
 class MobileLoginInitRequest(BaseModel):
-    phone: str
+    phone: str | None = None
+    phone_number: str | None = None
+
+    @root_validator(pre=True)
+    def normalize_phone(cls, values):
+        if isinstance(values, dict):
+            p = values.get("phone") or values.get("phone_number")
+            if not p:
+                raise ValueError("Phone number is required.")
+            values["phone"] = str(p).strip()
+            values["phone_number"] = str(p).strip()
+        return values
 
 class MobileLoginVerifyRequest(BaseModel):
-
-    phone: str
+    phone: str | None = None
+    phone_number: str | None = None
     otp: str
     selected_profile_id: str | None = None
+
+    @root_validator(pre=True)
+    def normalize_phone(cls, values):
+        if isinstance(values, dict):
+            p = values.get("phone") or values.get("phone_number")
+            if not p:
+                raise ValueError("Phone number is required.")
+            values["phone"] = str(p).strip()
+            values["phone_number"] = str(p).strip()
+        return values
 
 @router.post("/mobile-login-init")
 async def mobile_login_init(request: MobileLoginInitRequest, db: AsyncSession = Depends(get_db)):

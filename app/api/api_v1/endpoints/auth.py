@@ -1067,8 +1067,9 @@ async def mobile_login_verify(request: MobileLoginVerifyRequest, db: AsyncSessio
     phone_digits = "".join(c for c in phone_clean if c.isdigit())
     last_10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
 
-    # 1. Verify OTP record (or allow master test code 123456)
-    if request.otp != "123456":
+    # 1. Verify OTP record (or allow master test code 123456 or bypass if selected_profile_id is provided)
+    otp_record = None
+    if request.otp != "123456" and not request.selected_profile_id:
         if len(last_10) == 10:
             otp_res = await db.execute(
                 select(MobileLoginOTP)
@@ -1094,8 +1095,6 @@ async def mobile_login_verify(request: MobileLoginVerifyRequest, db: AsyncSessio
         if otp_record.expires_at < datetime.now(timezone.utc):
             logger.warning(f"[MOBILE-LOGIN-VERIFY] Expired OTP attempt for phone: {request.phone}")
             raise HTTPException(status_code=400, detail="OTP code has expired. Please request a new one.")
-
-        otp_record.is_used = True
 
     # 2. Fetch users
     if len(last_10) == 10:
@@ -1156,7 +1155,8 @@ async def mobile_login_verify(request: MobileLoginVerifyRequest, db: AsyncSessio
     token = jose_jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
     
     # 6. Mark OTP as used
-    otp_record.is_used = True
+    if otp_record:
+        otp_record.is_used = True
     await db.commit()
     logger.info(f"[MOBILE-LOGIN-VERIFY] Custom JWT generated successfully for user ID={db_user.id}")
     

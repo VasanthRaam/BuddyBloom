@@ -430,10 +430,15 @@ async def google_sync(request: GoogleSyncRequest, db: AsyncSession = Depends(get
         db_user = approved_users[0]
         logger.info(f"[GOOGLE-SYNC] Defaulting to first approved profile: ID={db_user.id}")
 
+    from app.core.security import create_access_token
+    token = create_access_token(
+        data={"sub": str(db_user.id), "email": db_user.email, "role": _role_value(db_user.role)}
+    )
+
     logger.info(f"[GOOGLE-SYNC] Sync successful for user ID={db_user.id}, role={db_user.role}")
     return {
         "type": "login_success",
-        "access_token": request.access_token,
+        "access_token": token,
         "user": {
             "id": str(db_user.id),
             "email": db_user.email,

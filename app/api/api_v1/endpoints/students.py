@@ -286,13 +286,14 @@ async def update_student(
         if student_in.phone is not None:
             student.user.phone = student_in.phone
 
+    actual_student_id = student.id
     await db.commit()
     
-    # Reload and return
+    # Reload and return using actual_student_id
     result = await db.execute(
         select(Student)
         .options(selectinload(Student.user), selectinload(Student.parent))
-        .where(Student.id == student_id)
+        .where(Student.id == actual_student_id)
     )
     student = result.scalars().first()
     

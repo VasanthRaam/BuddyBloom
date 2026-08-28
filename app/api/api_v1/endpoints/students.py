@@ -257,7 +257,7 @@ async def update_student(
     result = await db.execute(
         select(Student)
         .options(selectinload(Student.user), selectinload(Student.parent))
-        .where(Student.id == student_id)
+        .where((Student.id == student_id) | (Student.user_id == student_id))
     )
     student = result.scalars().first()
     if not student:
@@ -547,13 +547,15 @@ async def delete_student(
     logger = logging.getLogger("app.api.students")
 
     try:
-        # 1. Fetch student record
+        # 1. Fetch student record matching either Student.id or Student.user_id
         result = await db.execute(
-            select(Student).where(Student.id == student_id)
+            select(Student).where((Student.id == student_id) | (Student.user_id == student_id))
         )
         student = result.scalars().first()
         if not student:
             raise HTTPException(status_code=404, detail="Student not found")
+
+        student_id = student.id  # Bind to actual Student PK for cascading deletes
 
         user_id_to_delete = student.user_id
         parent_id = student.parent_id

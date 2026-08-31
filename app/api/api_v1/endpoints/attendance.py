@@ -28,7 +28,8 @@ async def mark_bulk_attendance(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/", response_model=List[AttendanceResponse])
+@router.get("", response_model=List[AttendanceResponse])
+@router.get("/", response_model=List[AttendanceResponse], include_in_schema=False)
 async def get_attendance(
     student_id: Optional[UUID] = Query(None, description="Filter by student ID"),
     batch_id: Optional[UUID] = Query(None, description="Filter by batch ID"),

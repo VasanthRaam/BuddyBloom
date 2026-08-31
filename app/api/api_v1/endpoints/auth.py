@@ -387,22 +387,18 @@ async def google_sync(request: GoogleSyncRequest, db: AsyncSession = Depends(get
     logger.info(f"[GOOGLE-SYNC] Found {len(approved_users)} approved profiles for email={request.email}")
 
     if not approved_users:
-        logger.info(f"[GOOGLE-SYNC] No approved profiles found. Checking pending registrations for email={request.email}")
-        # Check if they have a pending registration
-        pend_res = await db.execute(
-            select(PendingRegistration).where(func.lower(PendingRegistration.email) == func.lower(request.email))
+        logger.info(f"[GOOGLE-SYNC] No approved profile found for email={request.email}. Auto-creating approved student profile...")
+        new_user = User(
+            email=request.email.lower(),
+            full_name=request.full_name or request.email.split('@')[0].capitalize(),
+            role=UserRole.student,
+            is_approved=True,
+            is_active=True,
         )
-        pending = pend_res.scalars().first()
-        if pending:
-            logger.info(f"[GOOGLE-SYNC] Found pending registration with status={pending.status}")
-            if pending.status == "pending":
-                raise HTTPException(status_code=403, detail="Your Google registration is pending admin approval.")
-            if pending.status == "rejected":
-                raise HTTPException(status_code=403, detail=f"Your registration was rejected. Reason: {pending.rejection_reason}")
-        
-        # Truly not found -> Trigger registration flow on mobile
-        logger.info(f"[GOOGLE-SYNC] Profile not found. Returning 404 to trigger registration.")
-        raise HTTPException(status_code=404, detail="Profile not found. Please complete registration.")
+        db.add(new_user)
+        await db.commit()
+        await db.refresh(new_user)
+        approved_users = [new_user]
 
     # Handle multiple profiles if no specific profile is selected
     if len(approved_users) > 1 and not request.selected_profile_id:

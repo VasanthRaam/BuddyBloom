@@ -11,6 +11,7 @@ from app.api.deps import RequireRole
 router = APIRouter()
 
 @router.post("", response_model=HomeworkResponse)
+@router.post("/", response_model=HomeworkResponse, include_in_schema=False)
 async def create_homework(
     hw_in: HomeworkCreate,
     background_tasks: BackgroundTasks,
@@ -34,6 +35,7 @@ async def create_homework(
     return hw
 
 @router.get("", response_model=List[HomeworkResponse])
+@router.get("/", response_model=List[HomeworkResponse], include_in_schema=False)
 async def get_my_homework(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(RequireRole(["teacher", "admin", "student", "parent"]))

@@ -9,7 +9,8 @@ from app.services.user_service import UserService
 
 router = APIRouter()
 
-@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 async def create_user(
     user_in: UserCreate, 
     db: AsyncSession = Depends(get_db)
@@ -28,7 +29,8 @@ async def create_user(
     
     return await UserService.create_user(db=db, user_in=user_in)
 
-@router.get("/", response_model=List[UserResponse])
+@router.get("", response_model=List[UserResponse])
+@router.get("/", response_model=List[UserResponse], include_in_schema=False)
 async def read_users(
     skip: int = 0,
     limit: int = 100,

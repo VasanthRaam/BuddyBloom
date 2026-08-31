@@ -22,6 +22,15 @@ async def get_supabase_public_key():
             return None
     return _public_key
 
+def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(days=365)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+
 async def verify_token(token: str) -> dict:
     try:
         # First, try to decode without verification to see the algorithm

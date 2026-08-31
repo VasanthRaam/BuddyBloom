@@ -18,7 +18,8 @@ from app.api.deps import get_current_user, RequireRole
 
 router = APIRouter()
 
-@router.get("/", response_model=List[QuizResponse])
+@router.get("", response_model=List[QuizResponse])
+@router.get("/", response_model=List[QuizResponse], include_in_schema=False)
 async def list_quizzes(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
@@ -31,7 +32,8 @@ async def list_quizzes(
     print(f"🔍 [DEBUG] Found {len(quizzes)} quizzes")
     return quizzes
 
-@router.post("/", response_model=QuizResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=QuizResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=QuizResponse, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 async def create_quiz(
     quiz_in: QuizCreate,
     background_tasks: BackgroundTasks,

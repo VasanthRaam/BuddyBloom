@@ -97,7 +97,8 @@ async def create_fee_reminder(
             }
         )
 
-@router.get("/", response_model=List[FeeResponse])
+@router.get("", response_model=List[FeeResponse])
+@router.get("/", response_model=List[FeeResponse], include_in_schema=False)
 async def get_fees(
     db: AsyncSession = Depends(get_db),
     student_id: UUID = None,

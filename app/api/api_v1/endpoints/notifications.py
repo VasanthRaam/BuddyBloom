@@ -9,7 +9,8 @@ from app.api.deps import get_current_user
 
 router = APIRouter()
 
-@router.get("/")
+@router.get("")
+@router.get("/", include_in_schema=False)
 async def get_notifications(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)

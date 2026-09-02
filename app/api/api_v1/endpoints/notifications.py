@@ -35,6 +35,20 @@ async def get_notifications(
         } for n in notifications
     ]
 
+@router.get("/unread-count")
+async def get_unread_count(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    from sqlalchemy import func
+    user_uuid = UUID(current_user["id"])
+    result = await db.execute(
+        select(func.count(Notification.id))
+        .where(Notification.user_id == user_uuid, Notification.is_read == False)
+    )
+    count = result.scalar() or 0
+    return {"unread_count": count}
+
 @router.post("/{notification_id}/read")
 async def mark_as_read(
     notification_id: str,

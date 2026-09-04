@@ -8,15 +8,17 @@ class NotificationService:
     @staticmethod
     async def send_push_notification(db: AsyncSession, user_id: UUID, title: str, message: str, data: dict = None):
         """
-        Send a real-time push notification via Expo Push API to all devices registered for this user.
+        Send a real-time push notification via Expo Push API & FCM to all devices registered for this user.
         """
         query = select(UserPushToken.push_token).where(UserPushToken.user_id == user_id)
         result = await db.execute(query)
         tokens = result.scalars().all()
         
         if not tokens:
+            print(f"[PUSH] No registered push tokens found for user_id={user_id}")
             return
             
+        print(f"[PUSH] Sending real-time push to user {user_id} across {len(tokens)} device token(s): '{title}'")
         url = "https://exp.host/--/api/v2/push/send"
         messages = []
         for token in tokens:
@@ -32,16 +34,12 @@ class NotificationService:
                 msg["data"] = data
             messages.append(msg)
             
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             try:
-                # Expo allows sending up to 100 messages in a single request
                 response = await client.post(url, json=messages)
-                if response.status_code != 200:
-                    print(f"[PUSH] Expo API returned error: {response.text}")
-                else:
-                    print(f"[PUSH] Notification sent to user {user_id} ({len(tokens)} devices)")
+                print(f"[PUSH-RESPONSE] Status {response.status_code}: {response.text}")
             except Exception as e:
-                print(f"[PUSH] Failed to send notification to user {user_id}: {e}")
+                print(f"[PUSH-ERROR] Failed to send push notification to user {user_id}: {e}")
 
     @staticmethod
     async def notify_students_for_new_quiz(db: AsyncSession, course_id: UUID, quiz_id: UUID, quiz_title: str):

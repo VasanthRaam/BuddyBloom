@@ -183,19 +183,26 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
         from app.db.database import AsyncSessionLocal
         from app.services.notification_service import NotificationService
         from app.db.models import User, UserRole, Notification
+        from sqlalchemy import cast, String, func
         import uuid
         try:
             logger.info(f"[AUTH-REGISTER-NOTIF] Starting admin notifications for pending_id: {pending_id_str}")
             async with AsyncSessionLocal() as session:
-                admin_res = await session.execute(select(User).where(User.role == UserRole.admin))
+                admin_res = await session.execute(
+                    select(User).where(
+                        (User.role == UserRole.admin) |
+                        (cast(User.role, String) == 'admin') |
+                        (func.lower(cast(User.role, String)) == 'admin')
+                    )
+                )
                 admins = admin_res.scalars().all()
                 logger.info(f"[AUTH-REGISTER-NOTIF] Found {len(admins)} admin(s) to notify.")
                 for admin in admins:
                     notif = Notification(
                         id=uuid.uuid4(),
                         user_id=admin.id,
-                        title="New Registration Request",
-                        message=f"{full_name} ({role_str}) has requested to join BuddyBloom. Tap to review.",
+                        title="New Registration Request 👤",
+                        message=f"{full_name} ({role_str}) has requested to join VHA EduTech. Tap to review.",
                         link_to=f"PendingApproval:{pending_id_str}",
                         is_read=False,
                     )
@@ -393,7 +400,6 @@ async def google_sync(request: GoogleSyncRequest, db: AsyncSession = Depends(get
             full_name=request.full_name or request.email.split('@')[0].capitalize(),
             role=UserRole.student,
             is_approved=True,
-            is_active=True,
         )
         db.add(new_user)
         await db.commit()
@@ -448,26 +454,63 @@ async def google_sync(request: GoogleSyncRequest, db: AsyncSession = Depends(get
 async def list_pending(db: AsyncSession = Depends(get_db)):
     """
     Returns all pending registration requests. Callable by admin.
-    (Auth check is done in deps; we expose this publicly here and the
-     mobile app restricts the screen to admin role.)
+    Includes resolved course & batch names, parent info, and profile details.
     """
+    from app.db.models import Course, Batch
     result = await db.execute(
         select(PendingRegistration)
         .where(PendingRegistration.status == "pending")
         .order_by(PendingRegistration.created_at.asc())
     )
     rows = result.scalars().all()
-    return [
-        {
+
+    items = []
+    for r in rows:
+        courses = []
+        batches = []
+        if r.selected_course_ids:
+            for c_id in r.selected_course_ids:
+                try:
+                    c_res = await db.execute(select(Course.name).where(Course.id == uuid.UUID(str(c_id))))
+                    c_name = c_res.scalar()
+                    if c_name:
+                        courses.append(c_name)
+                except Exception:
+                    pass
+        if r.selected_batch_ids:
+            for b_id in r.selected_batch_ids:
+                try:
+                    b_res = await db.execute(
+                        select(Batch.name, Course.name)
+                        .join(Course, Batch.course_id == Course.id)
+                        .where(Batch.id == uuid.UUID(str(b_id)))
+                    )
+                    b_row = b_res.first()
+                    if b_row:
+                        batches.append(f"{b_row[1]} ({b_row[0]})")
+                        if b_row[1] not in courses:
+                            courses.append(b_row[1])
+                except Exception:
+                    pass
+
+        items.append({
             "id": str(r.id),
             "full_name": r.full_name,
             "email": r.email,
             "phone": r.phone,
             "role": _role_value(r.role),
             "created_at": r.created_at,
-        }
-        for r in rows
-    ]
+            "selected_courses": courses,
+            "selected_batches": batches,
+            "mother_name": r.mother_name,
+            "father_name": r.father_name,
+            "parent_phone_number": r.parent_phone_number,
+            "dob": str(r.dob) if r.dob else None,
+            "education_qualification": r.education_qualification,
+            "profile_picture": r.profile_picture,
+        })
+
+    return items
 
 
 @router.post("/approve/{pending_id}")
@@ -1021,7 +1064,6 @@ async def mobile_login_init(request: MobileLoginInitRequest, db: AsyncSession = 
             phone=phone_clean,
             role=UserRole.student,
             is_approved=True,
-            is_active=True,
         )
         db.add(new_user)
         await db.commit()
@@ -1258,7 +1300,6 @@ async def firebase_login_verify(request: FirebaseLoginVerifyRequest, db: AsyncSe
             phone=phone_clean,
             role=UserRole.student,
             is_approved=True,
-            is_active=True,
         )
         db.add(new_user)
         await db.commit()

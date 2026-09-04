@@ -19,8 +19,12 @@ async def request_enrollment(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Student or Parent requests enrollment in a new batch.
+    Student or Parent requests enrollment in one or multiple batches/courses.
     """
+    from sqlalchemy import cast, String, func
+    from app.db.models import User
+    from app.services.notification_service import NotificationService
+
     user_uuid = uuid.UUID(current_user["id"])
     
     # Auto-infer student_id if missing and user is a student
@@ -43,51 +47,97 @@ async def request_enrollment(
     if current_user["role"] not in ["admin"]:
         if student.user_id != user_uuid and student.parent_id != user_uuid:
             raise HTTPException(status_code=403, detail="Not authorized to enroll this student.")
-            
-    # Check if already enrolled
-    enr_res = await db.execute(
-        select(Enrollment).where(
-            Enrollment.student_id == request.student_id,
-            Enrollment.batch_id == request.batch_id
-        )
-    )
-    if enr_res.scalars().first():
-        raise HTTPException(status_code=400, detail="Student is already enrolled in this batch.")
-        
-    # Check if already pending
-    pend_res = await db.execute(
-        select(PendingEnrollment).where(
-            PendingEnrollment.student_id == request.student_id,
-            PendingEnrollment.batch_id == request.batch_id,
-            PendingEnrollment.status == "pending"
-        )
-    )
-    if pend_res.scalars().first():
-        raise HTTPException(status_code=400, detail="An enrollment request for this batch is already pending.")
 
-    pending_enrollment = PendingEnrollment(
-        student_id=request.student_id,
-        batch_id=request.batch_id,
-        status="pending"
+    # Collect batch IDs (from batch_ids list or single batch_id)
+    target_batch_ids = []
+    if request.batch_ids:
+        target_batch_ids.extend(request.batch_ids)
+    if request.batch_id and request.batch_id not in target_batch_ids:
+        target_batch_ids.append(request.batch_id)
+
+    if not target_batch_ids:
+        raise HTTPException(status_code=400, detail="At least one batch_id must be provided.")
+
+    created_pendings = []
+    requested_course_names = []
+
+    for b_id in target_batch_ids:
+        # Check if already enrolled
+        enr_res = await db.execute(
+            select(Enrollment).where(
+                Enrollment.student_id == request.student_id,
+                Enrollment.batch_id == b_id
+            )
+        )
+        if enr_res.scalars().first():
+            continue  # Skip if already enrolled
+            
+        # Check if already pending
+        pend_res = await db.execute(
+            select(PendingEnrollment).where(
+                PendingEnrollment.student_id == request.student_id,
+                PendingEnrollment.batch_id == b_id,
+                PendingEnrollment.status == "pending"
+            )
+        )
+        if pend_res.scalars().first():
+            continue  # Skip if already pending
+
+        pending_enrollment = PendingEnrollment(
+            student_id=request.student_id,
+            batch_id=b_id,
+            status="pending"
+        )
+        db.add(pending_enrollment)
+        created_pendings.append(pending_enrollment)
+
+        # Get course name for notification
+        b_res = await db.execute(
+            select(Batch, Course).join(Course, Batch.course_id == Course.id).where(Batch.id == b_id)
+        )
+        b_row = b_res.first()
+        if b_row and b_row[1]:
+            requested_course_names.append(b_row[1].name)
+
+    if not created_pendings:
+        raise HTTPException(status_code=400, detail="Student is already enrolled or has pending requests for the selected batch(es).")
+
+    # Notify Admins
+    admin_res = await db.execute(
+        select(User).where(
+            (User.role == UserRole.admin) |
+            (cast(User.role, String) == 'admin') |
+            (func.lower(cast(User.role, String)) == 'admin')
+        )
     )
-    db.add(pending_enrollment)
-    
-    # Notify Admin
-    from app.db.models import User
-    from app.services.notification_service import NotificationService
-    admin_res = await db.execute(select(User).where(User.role == UserRole.admin))
     admins = admin_res.scalars().all()
+    courses_str = ", ".join(set(requested_course_names)) if requested_course_names else "new courses"
+    student_name = f"{student.first_name} {student.last_name}".strip()
+
     for admin in admins:
         notif = Notification(
             user_id=admin.id,
-            title="New Enrollment Request",
-            message=f"{student.first_name} {student.last_name} requested to join a new course.",
+            title="New Enrollment Request 📝",
+            message=f"{student_name} requested enrollment in: {courses_str}",
             link_to="PendingApprovals"
         )
         db.add(notif)
+
+    # Notify Student/Parent in DB
+    student_user_id = student.user_id or student.parent_id
+    if student_user_id:
+        st_notif = Notification(
+            user_id=student_user_id,
+            title="Enrollment Request Sent ⏳",
+            message=f"Your request to enroll in {courses_str} has been sent to Admin for approval.",
+            link_to="MyCourses"
+        )
+        db.add(st_notif)
         
     await db.commit()
-    await db.refresh(pending_enrollment)
+
+    for p in created_pendings:
+        await db.refresh(p)
     
     # Trigger push notifications for admins
     for admin in admins:
@@ -96,18 +146,20 @@ async def request_enrollment(
                 db,
                 admin.id,
                 "New Enrollment Request 📝",
-                f"{student.first_name} {student.last_name} requested to join a new course.",
+                f"{student_name} requested enrollment in: {courses_str}",
                 {"type": "enrollment_request", "action": "approval", "screen": "PendingApprovals"}
             )
         except Exception as e:
             print(f"⚠️ [ENROLLMENT] Failed to send push notification to admin {admin.id}: {e}")
-    
+
+    # Return primary created pending enrollment
+    first_p = created_pendings[0]
     return PendingEnrollmentResponse(
-        id=pending_enrollment.id,
-        student_id=pending_enrollment.student_id,
-        batch_id=pending_enrollment.batch_id,
-        status=pending_enrollment.status,
-        created_at=pending_enrollment.created_at
+        id=first_p.id,
+        student_id=first_p.student_id,
+        batch_id=first_p.batch_id,
+        status=first_p.status,
+        created_at=first_p.created_at
     )
 
 @router.get("/pending", response_model=List[PendingEnrollmentResponse])

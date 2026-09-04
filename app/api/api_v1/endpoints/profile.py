@@ -54,6 +54,7 @@ async def get_my_profile(
         student = st_res.scalars().first()
 
         enrollments_info = []
+        pending_enrollments_info = []
         if student:
             enr_res = await db.execute(
                 select(Enrollment, Batch, Course)
@@ -68,6 +69,26 @@ async def get_my_profile(
                     course_id=str(course.id),
                     course_name=course.name,
                 ))
+
+            # Query pending enrollments as well
+            from app.db.models import PendingEnrollment
+            pend_res = await db.execute(
+                select(PendingEnrollment, Batch, Course)
+                .join(Batch, PendingEnrollment.batch_id == Batch.id)
+                .join(Course, Batch.course_id == Course.id)
+                .where(
+                    PendingEnrollment.student_id == student.id,
+                    PendingEnrollment.status == "pending"
+                )
+            )
+            for pend, batch, course in pend_res.all():
+                pending_enrollments_info.append({
+                    "batch_id": str(batch.id),
+                    "batch_name": batch.name,
+                    "course_id": str(course.id),
+                    "course_name": course.name,
+                    "status": "pending"
+                })
 
             # XP summary
             summary = await rewards_service.get_student_summary(db, student.id, user.full_name)
@@ -90,6 +111,7 @@ async def get_my_profile(
             "father_name": student.father_name if student else None,
             "parent_phone_number": student.parent_phone_number if student else None,
             "enrollments": [e.dict() for e in enrollments_info],
+            "pending_enrollments": pending_enrollments_info,
             **summary,
         }
 

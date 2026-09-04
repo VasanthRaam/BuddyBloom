@@ -1,10 +1,11 @@
 from pydantic import BaseModel, UUID4
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 class PendingEnrollmentCreate(BaseModel):
     student_id: Optional[UUID4] = None
-    batch_id: UUID4
+    batch_id: Optional[UUID4] = None
+    batch_ids: Optional[List[UUID4]] = None
 
 class PendingEnrollmentResponse(BaseModel):
     id: UUID4

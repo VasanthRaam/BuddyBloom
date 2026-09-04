@@ -123,12 +123,6 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
     course_ids = list(dict.fromkeys(req_course_ids))
     batch_ids = list(dict.fromkeys(req_batch_ids))
 
-    # If course_ids provided but no batch_ids, automatically resolve all batches belonging to those courses
-    if course_ids and not batch_ids:
-        from app.db.models import Batch
-        res_auto = await db.execute(select(Batch.id).where(Batch.course_id.in_(course_ids)))
-        batch_ids = list(res_auto.scalars().all())
-
     # Validate that selected course_ids exist in database
     if course_ids:
         from app.db.models import Course

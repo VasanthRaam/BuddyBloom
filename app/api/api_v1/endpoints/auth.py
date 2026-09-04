@@ -30,6 +30,7 @@ class RegisterRequest(BaseModel):
     full_name: str
     email: EmailStr
     phone: str | None = None
+    phone_number: str | None = None
     password: str
     role: str  # "teacher" | "student" | "parent"
     course_ids: list[uuid.UUID] | None = []
@@ -160,7 +161,7 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
         id=request.supabase_uid if request.supabase_uid else uuid.uuid4(),
         full_name=request.full_name,
         email=request.email,
-        phone=request.phone,
+        phone=request.phone or request.phone_number,
         hashed_temp_password=request.password,
         role=UserRole(request.role),
         status="pending",
@@ -394,17 +395,26 @@ async def google_sync(request: GoogleSyncRequest, db: AsyncSession = Depends(get
     logger.info(f"[GOOGLE-SYNC] Found {len(approved_users)} approved profiles for email={request.email}")
 
     if not approved_users:
-        logger.info(f"[GOOGLE-SYNC] No approved profile found for email={request.email}. Auto-creating approved student profile...")
-        new_user = User(
-            email=request.email.lower(),
-            full_name=request.full_name or request.email.split('@')[0].capitalize(),
-            role=UserRole.student,
-            is_approved=True,
+        logger.info(f"[GOOGLE-SYNC] No approved profile found for email={request.email}")
+        # Check if they have a pending registration
+        pend_res = await db.execute(
+            select(PendingRegistration).where(func.lower(PendingRegistration.email) == func.lower(request.email))
         )
-        db.add(new_user)
-        await db.commit()
-        await db.refresh(new_user)
-        approved_users = [new_user]
+        pending = pend_res.scalars().first()
+        if pending and pending.status == "pending":
+            raise HTTPException(
+                status_code=403,
+                detail="Your registration is pending admin approval. Please wait for approval before logging in."
+            )
+        if pending and pending.status == "rejected":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Your registration was rejected by admin. Reason: {pending.rejection_reason or 'No reason provided'}"
+            )
+        raise HTTPException(
+            status_code=404,
+            detail="Google account not registered yet. Please complete registration."
+        )
 
     # Handle multiple profiles if no specific profile is selected
     if len(approved_users) > 1 and not request.selected_profile_id:

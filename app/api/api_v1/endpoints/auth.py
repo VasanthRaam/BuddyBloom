@@ -35,6 +35,8 @@ class RegisterRequest(BaseModel):
     role: str  # "teacher" | "student" | "parent"
     course_ids: list[uuid.UUID] | None = []
     batch_ids: list[uuid.UUID] | None = []
+    selected_courses: list[uuid.UUID] | None = []
+    selected_batches: list[uuid.UUID] | None = []
     push_token: str | None = None
     supabase_uid: uuid.UUID | None = None
     mother_name: str | None = None
@@ -114,22 +116,35 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
         logger.warning(f"[AUTH-REGISTER] Email {request.email} already has a pending registration request.")
         raise HTTPException(status_code=409, detail="A registration request for this email is already pending.")
 
+    # Combine course and batch IDs from either schema field
+    req_course_ids = (request.course_ids or []) + (request.selected_courses or [])
+    req_batch_ids = (request.batch_ids or []) + (request.selected_batches or [])
+    # Deduplicate keeping UUID types
+    course_ids = list(dict.fromkeys(req_course_ids))
+    batch_ids = list(dict.fromkeys(req_batch_ids))
+
+    # If course_ids provided but no batch_ids, automatically resolve all batches belonging to those courses
+    if course_ids and not batch_ids:
+        from app.db.models import Batch
+        res_auto = await db.execute(select(Batch.id).where(Batch.course_id.in_(course_ids)))
+        batch_ids = list(res_auto.scalars().all())
+
     # Validate that selected course_ids exist in database
-    if request.course_ids:
+    if course_ids:
         from app.db.models import Course
-        res_c = await db.execute(select(Course.id).where(Course.id.in_(request.course_ids)))
+        res_c = await db.execute(select(Course.id).where(Course.id.in_(course_ids)))
         found_courses = res_c.scalars().all()
-        if len(found_courses) != len(request.course_ids):
-            logger.warning(f"[AUTH-REGISTER] Invalid course selection: requested={request.course_ids}, found={found_courses}")
+        if len(found_courses) != len(course_ids):
+            logger.warning(f"[AUTH-REGISTER] Invalid course selection: requested={course_ids}, found={found_courses}")
             raise HTTPException(status_code=400, detail="One or more selected courses are invalid.")
             
     # Validate that selected batch_ids exist in database
-    if request.batch_ids:
+    if batch_ids:
         from app.db.models import Batch
-        res_b = await db.execute(select(Batch.id).where(Batch.id.in_(request.batch_ids)))
+        res_b = await db.execute(select(Batch.id).where(Batch.id.in_(batch_ids)))
         found_batches = res_b.scalars().all()
-        if len(found_batches) != len(request.batch_ids):
-            logger.warning(f"[AUTH-REGISTER] Invalid batch selection: requested={request.batch_ids}, found={found_batches}")
+        if len(found_batches) != len(batch_ids):
+            logger.warning(f"[AUTH-REGISTER] Invalid batch selection: requested={batch_ids}, found={found_batches}")
             raise HTTPException(status_code=400, detail="One or more selected batches are invalid.")
 
     # Delete any existing rejected/approved registration requests for this email to allow re-applying (case-insensitive)
@@ -165,8 +180,8 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
         hashed_temp_password=request.password,
         role=UserRole(request.role),
         status="pending",
-        selected_course_ids=request.course_ids,
-        selected_batch_ids=request.batch_ids,
+        selected_course_ids=course_ids,
+        selected_batch_ids=batch_ids,
         push_token=request.push_token,
         mother_name=request.mother_name,
         father_name=request.father_name,

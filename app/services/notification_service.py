@@ -19,27 +19,56 @@ class NotificationService:
             return
             
         print(f"[PUSH] Sending real-time push to user {user_id} across {len(tokens)} device token(s): '{title}'")
-        url = "https://exp.host/--/api/v2/push/send"
-        messages = []
-        for token in tokens:
-            msg = {
-                "to": token,
-                "title": title,
-                "body": message,
-                "sound": "default",
-                "priority": "high",
-                "channelId": "default"
-            }
-            if data:
-                msg["data"] = data
-            messages.append(msg)
-            
+        
+        expo_tokens = [t for t in tokens if t.startswith("ExponentPushToken[") or t.startswith("ExpoPushToken[")]
+        fcm_tokens = [t for t in tokens if t not in expo_tokens and not t.startswith("flutter_device_")]
+
         async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                response = await client.post(url, json=messages)
-                print(f"[PUSH-RESPONSE] Status {response.status_code}: {response.text}")
-            except Exception as e:
-                print(f"[PUSH-ERROR] Failed to send push notification to user {user_id}: {e}")
+            # 1. Send to Expo tokens
+            if expo_tokens:
+                expo_url = "https://exp.host/--/api/v2/push/send"
+                expo_messages = [
+                    {
+                        "to": t,
+                        "title": title,
+                        "body": message,
+                        "sound": "default",
+                        "priority": "high",
+                        "data": data or {}
+                    }
+                    for t in expo_tokens
+                ]
+                try:
+                    res = await client.post(expo_url, json=expo_messages)
+                    print(f"[PUSH-EXPO] Status {res.status_code}: {res.text}")
+                except Exception as e:
+                    print(f"[PUSH-EXPO-ERROR] {e}")
+
+            # 2. Send to FCM tokens
+            if fcm_tokens:
+                fcm_url = "https://fcm.googleapis.com/fcm/send"
+                fcm_key = "AIzaSyDIgMB0T_XIBDIy6dPei6G52kk9by5WJpU"
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"key={fcm_key}"
+                }
+                for fcm_t in fcm_tokens:
+                    fcm_payload = {
+                        "to": fcm_t,
+                        "notification": {
+                            "title": title,
+                            "body": message,
+                            "sound": "default",
+                            "badge": 1
+                        },
+                        "priority": "high",
+                        "data": data or {}
+                    }
+                    try:
+                        res = await client.post(fcm_url, json=fcm_payload, headers=headers)
+                        print(f"[PUSH-FCM] Status {res.status_code}: {res.text}")
+                    except Exception as e:
+                        print(f"[PUSH-FCM-ERROR] {e}")
 
     @staticmethod
     async def notify_students_for_new_quiz(db: AsyncSession, course_id: UUID, quiz_id: UUID, quiz_title: str):

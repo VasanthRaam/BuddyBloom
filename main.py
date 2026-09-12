@@ -62,16 +62,10 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 @app.on_event("startup")
 async def startup_event():
     try:
-        import firebase_admin
-        from firebase_admin import credentials
-        import os
-        
         # Initialize Firebase Admin SDK
-        firebase_key_path = os.path.join(os.path.dirname(__file__), "..", "serviceAccountKey.json")
-        if os.path.exists(firebase_key_path) and not firebase_admin._apps:
-            cred = credentials.Certificate(firebase_key_path)
-            firebase_admin.initialize_app(cred)
-            print("[FIREBASE] Admin SDK initialized successfully")
+        from app.core.firebase import init_firebase_admin
+        init_firebase_admin()
+
         
         from app.db.database import engine
         from sqlalchemy import text

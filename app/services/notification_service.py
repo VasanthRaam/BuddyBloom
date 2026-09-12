@@ -49,9 +49,15 @@ class NotificationService:
                 try:
                     import firebase_admin
                     from firebase_admin import messaging
+                    from app.core.firebase import init_firebase_admin
+
+                    if not firebase_admin._apps:
+                        init_firebase_admin()
+
                     if not firebase_admin._apps:
                         print("[PUSH-FCM-ERROR] Firebase Admin SDK is not initialized!")
                     else:
+
                         for fcm_t in fcm_tokens:
                             try:
                                 # Convert all values in data dict to strings for FCM

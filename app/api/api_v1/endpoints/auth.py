@@ -771,9 +771,9 @@ async def approve_registration(
                 except Exception as rollback_err:
                     logger.error(f"[APPROVE-TASK] Failed to revert pending registration status: {rollback_err}", exc_info=True)
 
-    background_tasks.add_task(process_approval_task, str(pending.id))
+    await process_approval_task(str(pending.id))
     return {
-        "message": "User approved. Registration is being completed in the background.",
+        "message": "User approved. Registration completed successfully.",
         "pending_id": str(pending.id)
     }
 

@@ -86,8 +86,18 @@ class NotificationService:
                                 print(f"[PUSH-FCM] Successfully sent message: {response}")
                             except Exception as token_err:
                                 print(f"[PUSH-FCM-ERROR] Error sending to token {fcm_t}: {token_err}")
+                                if "NotRegistered" in str(token_err) or "Unregistered" in str(token_err):
+                                    try:
+                                        from app.db.models import UserPushToken
+                                        from sqlalchemy import delete
+                                        await db.execute(delete(UserPushToken).where(UserPushToken.push_token == fcm_t))
+                                        await db.commit()
+                                        print(f"[PUSH-CLEANUP] Removed stale token from DB: {fcm_t[:30]}...")
+                                    except Exception as clean_err:
+                                        print(f"[PUSH-CLEANUP-ERROR] Failed to remove stale token: {clean_err}")
                 except Exception as e:
                     print(f"[PUSH-FCM-ERROR] Global FCM error: {e}")
+
 
     @staticmethod
     async def notify_students_for_new_quiz(db: AsyncSession, course_id: UUID, quiz_id: UUID, quiz_title: str):

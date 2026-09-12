@@ -46,29 +46,42 @@ class NotificationService:
 
             # 2. Send to FCM tokens
             if fcm_tokens:
-                fcm_url = "https://fcm.googleapis.com/fcm/send"
-                fcm_key = "AIzaSyDIgMB0T_XIBDIy6dPei6G52kk9by5WJpU"
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"key={fcm_key}"
-                }
-                for fcm_t in fcm_tokens:
-                    fcm_payload = {
-                        "to": fcm_t,
-                        "notification": {
-                            "title": title,
-                            "body": message,
-                            "sound": "default",
-                            "badge": 1
-                        },
-                        "priority": "high",
-                        "data": data or {}
-                    }
-                    try:
-                        res = await client.post(fcm_url, json=fcm_payload, headers=headers)
-                        print(f"[PUSH-FCM] Status {res.status_code}: {res.text}")
-                    except Exception as e:
-                        print(f"[PUSH-FCM-ERROR] {e}")
+                try:
+                    import firebase_admin
+                    from firebase_admin import messaging
+                    if not firebase_admin._apps:
+                        print("[PUSH-FCM-ERROR] Firebase Admin SDK is not initialized!")
+                    else:
+                        for fcm_t in fcm_tokens:
+                            try:
+                                # Convert all values in data dict to strings for FCM
+                                stringified_data = {str(k): str(v) for k, v in (data or {}).items()}
+                                msg = messaging.Message(
+                                    notification=messaging.Notification(
+                                        title=title,
+                                        body=message,
+                                    ),
+                                    data=stringified_data,
+                                    token=fcm_t,
+                                    android=messaging.AndroidConfig(
+                                        priority='high',
+                                        notification=messaging.AndroidNotification(
+                                            sound='default',
+                                            default_sound=True,
+                                        )
+                                    ),
+                                    apns=messaging.APNSConfig(
+                                        payload=messaging.APNSPayload(
+                                            aps=messaging.Aps(sound='default')
+                                        )
+                                    )
+                                )
+                                response = messaging.send(msg)
+                                print(f"[PUSH-FCM] Successfully sent message: {response}")
+                            except Exception as token_err:
+                                print(f"[PUSH-FCM-ERROR] Error sending to token {fcm_t}: {token_err}")
+                except Exception as e:
+                    print(f"[PUSH-FCM-ERROR] Global FCM error: {e}")
 
     @staticmethod
     async def notify_students_for_new_quiz(db: AsyncSession, course_id: UUID, quiz_id: UUID, quiz_title: str):

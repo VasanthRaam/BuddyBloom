@@ -188,56 +188,55 @@ async def register(request: RegisterRequest, background_tasks: BackgroundTasks, 
     await db.flush()
     logger.info(f"[AUTH-REGISTER] Stored pending registration with ID={pending.id} for email={request.email}")
 
-    # Trigger notifications in background
-    async def notify_admins(pending_id_str, full_name, role_str):
-        from app.db.database import AsyncSessionLocal
+    # Trigger notifications synchronously before returning to prevent Cloud Run CPU freeze
+    async def notify_admins(session, pending_id_str, full_name, role_str):
         from app.services.notification_service import NotificationService
         from app.db.models import User, UserRole, Notification
         from sqlalchemy import cast, String, func
         import uuid
         try:
             logger.info(f"[AUTH-REGISTER-NOTIF] Starting admin notifications for pending_id: {pending_id_str}")
-            async with AsyncSessionLocal() as session:
-                admin_res = await session.execute(
-                    select(User).where(
-                        (User.role == UserRole.admin) |
-                        (cast(User.role, String) == 'admin') |
-                        (func.lower(cast(User.role, String)) == 'admin')
-                    )
+            admin_res = await session.execute(
+                select(User).where(
+                    (User.role == UserRole.admin) |
+                    (cast(User.role, String) == 'admin') |
+                    (func.lower(cast(User.role, String)) == 'admin')
                 )
-                admins = admin_res.scalars().all()
-                logger.info(f"[AUTH-REGISTER-NOTIF] Found {len(admins)} admin(s) to notify.")
-                for admin in admins:
-                    notif = Notification(
-                        id=uuid.uuid4(),
-                        user_id=admin.id,
-                        title="New Registration Request 👤",
-                        message=f"{full_name} ({role_str}) has requested to join VHA EduTech. Tap to review.",
-                        link_to=f"PendingApproval:{pending_id_str}",
-                        is_read=False,
+            )
+            admins = admin_res.scalars().all()
+            logger.info(f"[AUTH-REGISTER-NOTIF] Found {len(admins)} admin(s) to notify.")
+            for admin in admins:
+                notif = Notification(
+                    id=uuid.uuid4(),
+                    user_id=admin.id,
+                    title="New Registration Request 👤",
+                    message=f"{full_name} ({role_str}) has requested to join VHA EduTech. Tap to review.",
+                    link_to=f"PendingApproval:{pending_id_str}",
+                    is_read=False,
+                )
+                session.add(notif)
+                try:
+                    await NotificationService.send_push_notification(
+                        session, admin.id, "New Registration Request 👤",
+                        f"{full_name} ({role_str}) has requested to join. Tap to review.",
+                        {"type": "registration", "id": pending_id_str}
                     )
-                    session.add(notif)
-                    try:
-                        await NotificationService.send_push_notification(
-                            session, admin.id, "New Registration Request 👤",
-                            f"{full_name} ({role_str}) has requested to join. Tap to review.",
-                            {"type": "registration", "id": pending_id_str}
-                        )
-                        logger.info(f"[AUTH-REGISTER-NOTIF] Sent push notification to admin {admin.email}")
-                    except Exception as push_err:
-                        logger.error(f"[AUTH-REGISTER-NOTIF] Push notification failed for admin {admin.email}: {push_err}", exc_info=True)
-                await session.commit()
-                logger.info(f"[AUTH-REGISTER-NOTIF] Completed admin notifications successfully.")
+                    logger.info(f"[AUTH-REGISTER-NOTIF] Sent push notification to admin {admin.email}")
+                except Exception as push_err:
+                    logger.error(f"[AUTH-REGISTER-NOTIF] Push notification failed for admin {admin.email}: {push_err}", exc_info=True)
+            await session.commit()
+            logger.info(f"[AUTH-REGISTER-NOTIF] Completed admin notifications successfully.")
         except Exception as bg_exc:
-            logger.error(f"[AUTH-REGISTER-NOTIF] Background notification task failed: {bg_exc}", exc_info=True)
+            logger.error(f"[AUTH-REGISTER-NOTIF] Notification task failed: {bg_exc}", exc_info=True)
 
     await db.commit()
-    background_tasks.add_task(notify_admins, str(pending.id), request.full_name, request.role)
+    await notify_admins(db, str(pending.id), request.full_name, request.role)
 
     return {
         "message": "Registration submitted. An admin will review your request. You will be able to login once approved.",
         "pending_id": str(pending.id),
     }
+
 
 
 @router.post("/login")

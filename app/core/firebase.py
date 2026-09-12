@@ -21,10 +21,10 @@ def init_firebase_admin() -> bool:
             cred_dict = json.loads(service_account_json)
             cred = credentials.Certificate(cred_dict)
             firebase_admin.initialize_app(cred)
-            print("✅ [FIREBASE] Initialized from FIREBASE_SERVICE_ACCOUNT_JSON env var")
+            print("[FIREBASE] Initialized from FIREBASE_SERVICE_ACCOUNT_JSON env var")
             return True
         except Exception as e:
-            print(f"⚠️ [FIREBASE] Failed to init from env var JSON: {e}")
+            print(f"[FIREBASE] Failed to init from env var JSON: {e}")
 
     # 2. Check local file paths
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,25 +39,26 @@ def init_firebase_admin() -> bool:
             try:
                 cred = credentials.Certificate(path)
                 firebase_admin.initialize_app(cred)
-                print(f"✅ [FIREBASE] Initialized from key file: {path}")
+                print(f"[FIREBASE] Initialized from key file: {path}")
                 return True
             except Exception as e:
-                print(f"⚠️ [FIREBASE] Failed to init from key file {path}: {e}")
+                print(f"[FIREBASE] Failed to init from key file {path}: {e}")
 
     # 3. Fallback to Google Application Default Credentials (GCP / Cloud Run)
     try:
         cred = credentials.ApplicationDefault()
         firebase_admin.initialize_app(cred)
-        print("✅ [FIREBASE] Initialized using Application Default Credentials (ADC)")
+        print("[FIREBASE] Initialized using Application Default Credentials (ADC)")
         return True
     except Exception as e:
-        print(f"⚠️ [FIREBASE] Failed to init via ADC: {e}")
+        print(f"[FIREBASE] Failed to init via ADC: {e}")
 
     # 4. Default initialization
     try:
         firebase_admin.initialize_app()
-        print("✅ [FIREBASE] Initialized default app")
+        print("[FIREBASE] Initialized default app")
         return True
     except Exception as e:
-        print(f"❌ [FIREBASE] Could not initialize Firebase Admin SDK: {e}")
+        print(f"[FIREBASE] Could not initialize Firebase Admin SDK: {e}")
         return False
+

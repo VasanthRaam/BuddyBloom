@@ -88,7 +88,6 @@ class NotificationService:
                                 print(f"[PUSH-FCM-ERROR] Error sending to token {fcm_t}: {token_err}")
                                 if "NotRegistered" in str(token_err) or "Unregistered" in str(token_err):
                                     try:
-                                        from app.db.models import UserPushToken
                                         from sqlalchemy import delete
                                         await db.execute(delete(UserPushToken).where(UserPushToken.push_token == fcm_t))
                                         await db.commit()

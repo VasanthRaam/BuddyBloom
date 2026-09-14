@@ -157,6 +157,15 @@ async def startup_event():
                     updated_at TIMESTAMPTZ DEFAULT now()
                 );
             """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS pending_enrollments (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+                    batch_id UUID REFERENCES batches(id) ON DELETE CASCADE,
+                    status VARCHAR DEFAULT 'pending',
+                    created_at TIMESTAMPTZ DEFAULT now()
+                );
+            """))
             # Seed default reward catalog items if empty
             count_res = await conn.execute(text("SELECT COUNT(*) FROM reward_catalog;"))
             if count_res.scalar() == 0:

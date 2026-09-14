@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 from typing import List
 
 from app.db.database import get_db
-from app.db.models import PendingEnrollment, Enrollment, Student, Batch, Notification, UserRole
+from app.db.models import PendingEnrollment, Enrollment, Student, Batch, Notification, UserRole, Course
 from app.api.deps import get_current_user
 from app.schemas.enrollment import PendingEnrollmentCreate, PendingEnrollmentResponse
 
@@ -84,6 +84,7 @@ async def request_enrollment(
             continue  # Skip if already pending
 
         pending_enrollment = PendingEnrollment(
+            id=uuid.uuid4(),
             student_id=request.student_id,
             batch_id=b_id,
             status="pending"
@@ -116,6 +117,7 @@ async def request_enrollment(
 
     for admin in admins:
         notif = Notification(
+            id=uuid.uuid4(),
             user_id=admin.id,
             title="New Enrollment Request 📝",
             message=f"{student_name} requested enrollment in: {courses_str}",
@@ -127,6 +129,7 @@ async def request_enrollment(
     student_user_id = student.user_id or student.parent_id
     if student_user_id:
         st_notif = Notification(
+            id=uuid.uuid4(),
             user_id=student_user_id,
             title="Enrollment Request Sent ⏳",
             message=f"Your request to enroll in {courses_str} has been sent to Admin for approval.",
@@ -221,6 +224,7 @@ async def approve_enrollment(
         
     # Create the actual enrollment
     enrollment = Enrollment(
+        id=uuid.uuid4(),
         student_id=pending.student_id,
         batch_id=pending.batch_id
     )
@@ -233,6 +237,7 @@ async def approve_enrollment(
     course_name = pending.batch.course.name if pending.batch and pending.batch.course else "a course"
     if user_id_to_notify:
         notif = Notification(
+            id=uuid.uuid4(),
             user_id=user_id_to_notify,
             title="Enrollment Approved",
             message=f"Your request to join {course_name} has been approved!",
@@ -285,6 +290,7 @@ async def reject_enrollment(
     course_name = pending.batch.course.name if pending.batch and pending.batch.course else "a course"
     if user_id_to_notify:
         notif = Notification(
+            id=uuid.uuid4(),
             user_id=user_id_to_notify,
             title="Enrollment Rejected",
             message=f"Your request to join {course_name} was rejected.",

@@ -221,6 +221,14 @@ async def mark_fee_received(
         except Exception as e:
             print(f"⚠️ [FEES] Failed to send push notification to user {fee.user_id}: {e}")
 
+        # Notify admins
+        await NotificationService.notify_fee_paid(
+            db,
+            fee.user.full_name if fee.user else "A student",
+            fee.amount,
+            fee.course.name if fee.course else ""
+        )
+
         return fee
     except Exception as e:
         import traceback

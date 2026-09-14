@@ -168,6 +168,27 @@ class NotificationService:
             )
         
         await db.commit()
+        
+        # Also notify admins
+        from app.db.models import User
+        admin_res = await db.execute(select(User.id).where(User.role == "admin"))
+        admin_ids = admin_res.scalars().all()
+        for aid in admin_ids:
+            db.add(Notification(
+                user_id=aid,
+                title=notif_title,
+                message=notif_message,
+                link_to=f"Homework:{homework_id}"
+            ))
+        await db.commit()
+        for aid in admin_ids:
+            try:
+                await NotificationService.send_push_notification(
+                    db, aid, notif_title, notif_message, {"type": "homework"}
+                )
+            except Exception:
+                pass
+                
         return len(user_ids)
     @staticmethod
     async def notify_admins_new_registration(db: AsyncSession, new_user_name: str, new_user_role: str):
@@ -350,4 +371,66 @@ class NotificationService:
             message,
             {"type": "fee_due", "screen": "Fees"},
         )
+
+    @staticmethod
+    async def notify_admins_and_teachers_for_student(
+        db: AsyncSession,
+        student_id: UUID,
+        title: str,
+        message: str,
+        link_to: str,
+        push_data: dict,
+    ):
+        """
+        Notify all admins and the specific student's teachers.
+        """
+        from app.db.models import User, Batch, Enrollment
+        
+        # Find all admins
+        admin_res = await db.execute(select(User).where(User.role == "admin"))
+        admins = admin_res.scalars().all()
+        
+        # Find student's teachers
+        teacher_query = (
+            select(Batch.teacher_id)
+            .join(Enrollment, Enrollment.batch_id == Batch.id)
+            .where(Enrollment.student_id == student_id, Batch.teacher_id.isnot(None))
+        )
+        teacher_res = await db.execute(teacher_query)
+        teacher_ids = list(set([r[0] for r in teacher_res.all()]))
+        
+        teachers = []
+        if teacher_ids:
+            teachers_res = await db.execute(select(User).where(User.id.in_(teacher_ids)))
+            teachers = teachers_res.scalars().all()
+
+        users_to_notify = list(admins) + list(teachers)
+        notified_ids = set()
+        
+        for u in users_to_notify:
+            if u.id in notified_ids:
+                continue
+            notified_ids.add(u.id)
+            
+            db.add(Notification(
+                user_id=u.id,
+                title=title,
+                message=message,
+                link_to=link_to
+            ))
+            
+        await db.commit()
+        
+        for uid in notified_ids:
+            try:
+                await NotificationService.send_push_notification(
+                    db,
+                    uid,
+                    title,
+                    message,
+                    push_data
+                )
+            except Exception as e:
+                print(f"⚠️ [PUSH] Failed to notify admin/teacher {uid}: {e}")
+
 

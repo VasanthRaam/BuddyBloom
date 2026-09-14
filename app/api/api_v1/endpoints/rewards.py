@@ -57,27 +57,39 @@ async def get_points_history(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    user_id = UUID(current_user["id"])
-    st_res = await db.execute(select(Student).where(Student.user_id == user_id))
-    student = st_res.scalars().first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Student profile not found.")
-
     offset = (page - 1) * page_size
+    user_id = UUID(current_user["id"])
 
-    count_res = await db.execute(
-        select(func.count(PointTransaction.id))
-        .where(PointTransaction.student_id == student.id)
-    )
-    total = count_res.scalar() or 0
+    if current_user["role"] in ("admin", "teacher"):
+        count_res = await db.execute(select(func.count(PointTransaction.id)))
+        total = count_res.scalar() or 0
 
-    txn_res = await db.execute(
-        select(PointTransaction, User)
-        .outerjoin(User, PointTransaction.given_by == User.id)
-        .where(PointTransaction.student_id == student.id)
-        .order_by(PointTransaction.created_at.desc())
-        .limit(page_size).offset(offset)
-    )
+        txn_res = await db.execute(
+            select(PointTransaction, User)
+            .outerjoin(User, PointTransaction.given_by == User.id)
+            .order_by(PointTransaction.created_at.desc())
+            .limit(page_size).offset(offset)
+        )
+    else:
+        st_res = await db.execute(select(Student).where(Student.user_id == user_id))
+        student = st_res.scalars().first()
+        if not student:
+            raise HTTPException(status_code=404, detail="Student profile not found.")
+
+        count_res = await db.execute(
+            select(func.count(PointTransaction.id))
+            .where(PointTransaction.student_id == student.id)
+        )
+        total = count_res.scalar() or 0
+
+        txn_res = await db.execute(
+            select(PointTransaction, User)
+            .outerjoin(User, PointTransaction.given_by == User.id)
+            .where(PointTransaction.student_id == student.id)
+            .order_by(PointTransaction.created_at.desc())
+            .limit(page_size).offset(offset)
+        )
+
     rows = txn_res.all()
 
     transactions = []
@@ -351,6 +363,15 @@ async def give_points_to_student(
         )
     except Exception as e:
         print(f"[PUSH] Failed to trigger push notification for points award: {e}")
+
+    await NotificationService.notify_admins_and_teachers_for_student(
+        db,
+        student_id,
+        "XP Awarded ⭐",
+        f"{student.first_name} received {req.points} XP from {current_user['full_name']}.",
+        "Leaderboard",
+        {"type": "points_awarded"}
+    )
 
     await db.commit()
 

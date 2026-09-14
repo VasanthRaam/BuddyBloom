@@ -315,6 +315,16 @@ async def approve_leave_request(
             )
         except Exception as e:
             print(f"⚠️ [LEAVE] Failed to send push notification to user {user_id_to_notify}: {e}")
+            
+    # Notify admins & teachers that leave was approved
+    await NotificationService.notify_admins_and_teachers_for_student(
+        db,
+        leave_req.student_id,
+        "Leave Approved ✅",
+        f"Leave request for {leave_req.student.first_name} was approved.",
+        "PendingApprovals",
+        {"type": "leave_handled"}
+    )
     return {"message": "Leave request approved and attendance marked."}
 
 @router.post("/leave_requests/{request_id}/reject")
@@ -364,4 +374,14 @@ async def reject_leave_request(
             )
         except Exception as e:
             print(f"⚠️ [LEAVE] Failed to send push notification to user {user_id_to_notify}: {e}")
+            
+    # Notify admins & teachers that leave was rejected
+    await NotificationService.notify_admins_and_teachers_for_student(
+        db,
+        leave_req.student_id,
+        "Leave Rejected ❌",
+        f"Leave request for {leave_req.student.first_name} was rejected.",
+        "PendingApprovals",
+        {"type": "leave_handled"}
+    )
     return {"message": "Leave request rejected."}

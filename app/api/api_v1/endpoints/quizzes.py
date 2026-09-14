@@ -110,15 +110,15 @@ async def get_quiz(
 async def submit_quiz(
     quiz_id: UUID,
     submission: QuizSubmission,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(RequireRole(["student"]))
 ):
     """
     Submit a quiz attempt. Only accessible by students.
-    Automatically evaluates the score.
+    Automatically evaluates the score and awards XP.
     """
     # Find the student profile ID using the current_user's UUID
-    # Since we need the student_id from the students table, we fetch it here.
     from app.db.models import Student
     from sqlalchemy.future import select
     
@@ -135,22 +135,53 @@ async def submit_quiz(
     try:
         eval_result = await QuizService.submit_quiz(db, quiz_id, student.id, submission)
         attempt = eval_result["attempt"]
+        max_score = eval_result["max_score"]
 
         # ── XP Points: award after quiz submission ──────────────────────────
+        xp_earned = 0
         try:
             from app.services.rewards_service import award_quiz_points
-            await award_quiz_points(db, student.id, attempt.id, attempt.total_score)
+            txn = await award_quiz_points(db, student.id, attempt.id, attempt.total_score)
             await db.commit()
+            if txn:
+                xp_earned = txn.points
         except Exception as pts_err:
             print(f"[XP System] Failed to award points for attempt {attempt.id}: {pts_err}")
+
+        # ── Notify student of their result via background task ──────────────
+        # We use a fresh DB session in the background task to avoid session conflicts
+        quiz_title_for_notif = getattr(attempt, 'quiz', None)
+        async def _notify_quiz(user_id_str, title, total, maximum, xp):
+            from app.db.database import AsyncSessionLocal
+            from app.services.notification_service import NotificationService
+            from uuid import UUID as _UUID
+            async with AsyncSessionLocal() as session:
+                await NotificationService.notify_quiz_result(
+                    session,
+                    _UUID(user_id_str),
+                    title,
+                    total,
+                    maximum,
+                    xp,
+                )
+
+        background_tasks.add_task(
+            _notify_quiz,
+            str(student.user_id),
+            eval_result.get("quiz_title", "Quiz"),
+            attempt.total_score,
+            max_score,
+            xp_earned,
+        )
 
         return QuizResultResponse(
             attempt_id=attempt.id,
             quiz_id=attempt.quiz_id,
             student_id=attempt.student_id,
             total_score=attempt.total_score,
-            max_score=eval_result["max_score"],
-            attempted_at=attempt.attempted_at
+            max_score=max_score,
+            attempted_at=attempt.attempted_at,
+            xp_earned=xp_earned,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

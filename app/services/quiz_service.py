@@ -189,8 +189,10 @@ class QuizService:
         
         return {
             "attempt": db_attempt,
-            "max_score": max_score
+            "max_score": max_score,
+            "quiz_title": quiz.title,
         }
+
 
     @staticmethod
     async def get_attempts(db: AsyncSession, user_id: UUID, role: str, quiz_id: UUID | None = None, batch_id: UUID | None = None, course_id: UUID | None = None) -> list[QuizAttempt]:

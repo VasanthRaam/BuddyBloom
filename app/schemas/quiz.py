@@ -80,6 +80,7 @@ class QuizResultResponse(BaseModel):
     total_score: int
     max_score: int
     attempted_at: datetime
+    xp_earned: Optional[int] = None  # XP points awarded for this attempt
 
     model_config = ConfigDict(from_attributes=True)
 

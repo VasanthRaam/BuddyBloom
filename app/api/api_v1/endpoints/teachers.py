@@ -8,7 +8,44 @@ from app.db.database import get_db
 from app.db.models import User, UserRole, Batch, Course, Enrollment, Student
 from sqlalchemy import text
 
+from app.api.deps import get_current_user
+
 router = APIRouter()
+
+from pydantic import BaseModel
+class AdminTeacherCreateRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    phone: str
+    selected_course_ids: List[str] = []
+    selected_batch_ids: List[str] = []
+
+@router.post("/admin-create")
+async def admin_create_teacher(
+    request: AdminTeacherCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Admin directly creates an active teacher.
+    Bypasses pending approval.
+    """
+    from app.services.user_creation_service import UserCreationService
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can perform this action.")
+
+    user = await UserCreationService.create_active_user(
+        db=db,
+        email=request.email,
+        password=request.password,
+        full_name=request.full_name,
+        phone=request.phone,
+        role=UserRole.teacher,
+        selected_course_ids=request.selected_course_ids,
+        selected_batch_ids=request.selected_batch_ids
+    )
+    return {"message": "Teacher created successfully.", "id": str(user.id)}
 
 @router.get("/")
 async def get_teachers(db: AsyncSession = Depends(get_db)):
@@ -111,8 +148,17 @@ async def update_teacher_batches(teacher_id: UUID, request: TeacherBatchesUpdate
     return {"message": "Teacher batches updated"}
 
 @router.delete("/{teacher_id}")
-async def delete_teacher(teacher_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Delete a teacher."""
+async def delete_teacher(
+    teacher_id: UUID, 
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Soft-Delete a teacher. Admin only."""
+    from sqlalchemy import update
+    
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can delete teachers.")
+        
     t_query = select(User).where(User.id == teacher_id, User.role == UserRole.teacher)
     t_res = await db.execute(t_query)
     teacher = t_res.scalars().first()
@@ -123,7 +169,7 @@ async def delete_teacher(teacher_id: UUID, db: AsyncSession = Depends(get_db)):
     update_q = text("UPDATE batches SET teacher_id = NULL WHERE teacher_id = :tid")
     await db.execute(update_q, {"tid": teacher_id})
     
-    # Delete teacher
-    await db.delete(teacher)
+    # Soft delete teacher
+    await db.execute(update(User).where(User.id == teacher_id).values(is_approved=False))
     await db.commit()
-    return {"message": "Teacher deleted"}
+    return {"message": "Teacher deactivated"}

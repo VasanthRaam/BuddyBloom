@@ -518,35 +518,148 @@ async def admin_create_student(
         logger.error(f"[ADMIN-CREATE-STUDENT] Unexpected error: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create student: {str(exc)}")
 
-@router.delete("/{student_id}")
+class AdminStudentCreateRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    phone: str
+    selected_course_ids: list[str] = []
+    selected_batch_ids: list[str] = []
 
+@router.post("/admin-create")
+async def admin_create_student(
+    request: AdminStudentCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Admin directly creates an active student.
+    Bypasses pending approval.
+    """
+    from app.services.user_creation_service import UserCreationService
+    from app.db.models import UserRole
+
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can perform this action.")
+
+    user = await UserCreationService.create_active_user(
+        db=db,
+        email=request.email,
+        password=request.password,
+        full_name=request.full_name,
+        phone=request.phone,
+        role=UserRole.student,
+        selected_course_ids=request.selected_course_ids,
+        selected_batch_ids=request.selected_batch_ids
+    )
+    return {"message": "Student created successfully.", "id": str(user.id)}
+
+@router.post("/teacher-create")
+async def teacher_create_student(
+    request: AdminStudentCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Teacher directly creates an active student.
+    Strictly verifies the batches belong to the teacher.
+    Triggers admin push notification.
+    """
+    from app.services.user_creation_service import UserCreationService
+    from app.services.notification_service import NotificationService
+    from app.db.models import UserRole, Batch, User, Notification
+    from sqlalchemy import select, cast, String, func
+    import uuid
+    import asyncio
+
+    if current_user.get("role") != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can perform this action.")
+
+    teacher_id = UUID(current_user["id"])
+
+    # 1. Enforce RBAC: the provided batches must belong to this teacher
+    if not request.selected_batch_ids:
+        raise HTTPException(status_code=400, detail="Teacher must assign the student to a batch.")
+
+    batch_res = await db.execute(
+        select(Batch).where(Batch.teacher_id == teacher_id)
+    )
+    teacher_batches = batch_res.scalars().all()
+    teacher_batch_ids = [str(b.id) for b in teacher_batches]
+
+    for b_id in request.selected_batch_ids:
+        if b_id not in teacher_batch_ids:
+            raise HTTPException(status_code=403, detail="You can only create students for batches assigned to you.")
+
+    user = await UserCreationService.create_active_user(
+        db=db,
+        email=request.email,
+        password=request.password,
+        full_name=request.full_name,
+        phone=request.phone,
+        role=UserRole.student,
+        selected_course_ids=request.selected_course_ids,
+        selected_batch_ids=request.selected_batch_ids
+    )
+    
+    # 2. Notify Admin
+    async def notify_admins(session, student_name, teacher_name):
+        try:
+            admin_res = await session.execute(
+                select(User).where(
+                    (User.role == UserRole.admin) |
+                    (cast(User.role, String) == 'admin') |
+                    (func.lower(cast(User.role, String)) == 'admin')
+                )
+            )
+            admins = admin_res.scalars().all()
+            for admin in admins:
+                notif = Notification(
+                    id=uuid.uuid4(),
+                    user_id=admin.id,
+                    title="Student Created by Teacher",
+                    message=f"Teacher {teacher_name} created a new student: {student_name}",
+                    is_read=False,
+                )
+                session.add(notif)
+                await NotificationService.send_push_notification(
+                    session, admin.id, "Student Created",
+                    f"Teacher {teacher_name} created student {student_name}",
+                    {"type": "student_creation"}
+                )
+            await session.commit()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to notify admins: {e}")
+
+    teacher_name = current_user.get("full_name") or "Unknown"
+    asyncio.create_task(notify_admins(db, request.full_name, teacher_name))
+
+    return {"message": "Student created successfully.", "id": str(user.id)}
+
+@router.delete("/{student_id}")
 async def delete_student(
     student_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Delete a student. Admin only.
-    Automatically deletes their associated User record (student login)
-    and removes them from Supabase Auth as well.
+    Soft-Delete a student. Admin and authorized Teachers only.
+    Sets is_approved = False on the user record to preserve historical data
+    like quizzes, points, and attendance.
     """
-    if current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can delete students")
-
     import logging
-    from sqlalchemy import delete, update
-    from app.db.models import (
-        Student, User, PointTransaction, RewardRedemption,
-        QuizAttempt, Attendance, Enrollment, FeePayment,
-        HomeworkSubmission, Homework, UserPushToken, ChatMessage,
-        Notification, LeaveRequest, PendingEnrollment,
-        PasswordResetOTP, MobileLoginOTP, PendingRegistration,
-        ProgressTracking
-    )
-    from app.core.config import settings
-    from supabase import create_client as _cc
+    from sqlalchemy import select, update
+    from app.db.models import Student, User, Batch, Enrollment, Notification, UserRole
+    from app.services.notification_service import NotificationService
+    import uuid
+    import asyncio
 
     logger = logging.getLogger("app.api.students")
+    
+    role = current_user.get("role")
+    if role not in ["admin", "teacher"]:
+        raise HTTPException(status_code=403, detail="Only admins and teachers can delete students.")
 
     try:
         # 1. Fetch student record matching either Student.id or Student.user_id
@@ -557,83 +670,71 @@ async def delete_student(
         if not student:
             raise HTTPException(status_code=404, detail="Student not found")
 
-        student_id = student.id  # Bind to actual Student PK for cascading deletes
-
+        student_id = student.id
         user_id_to_delete = student.user_id
-        parent_id = student.parent_id
 
-        # Fetch user email directly via SQL scalar to prevent lazy-load greenlet errors
-        student_email = None
+        # 2. If teacher, verify authorization (student must be in their batch)
+        if role == "teacher":
+            teacher_id = UUID(current_user["id"])
+            batch_res = await db.execute(select(Batch.id).where(Batch.teacher_id == teacher_id))
+            teacher_batch_ids = [row[0] for row in batch_res.fetchall()]
+            
+            enroll_res = await db.execute(select(Enrollment).where(Enrollment.student_id == student_id))
+            student_enrollments = enroll_res.scalars().all()
+            
+            authorized = any(e.batch_id in teacher_batch_ids for e in student_enrollments)
+            if not authorized:
+                raise HTTPException(status_code=403, detail="You can only delete students enrolled in your batches.")
+
+        # 3. Soft Delete (Deactivation)
         if user_id_to_delete:
-            u_res = await db.execute(select(User.email).where(User.id == user_id_to_delete))
-            student_email = u_res.scalar()
-
-        # 2. Delete all child records that reference student_id
-        await db.execute(delete(ProgressTracking).where(ProgressTracking.student_id == student_id))
-        await db.execute(delete(PointTransaction).where(PointTransaction.student_id == student_id))
-        await db.execute(delete(RewardRedemption).where(RewardRedemption.student_id == student_id))
-        await db.execute(delete(QuizAttempt).where(QuizAttempt.student_id == student_id))
-        await db.execute(delete(Attendance).where(Attendance.student_id == student_id))
-        await db.execute(delete(Enrollment).where(Enrollment.student_id == student_id))
-        await db.execute(delete(LeaveRequest).where(LeaveRequest.student_id == student_id))
-        await db.execute(delete(PendingEnrollment).where(PendingEnrollment.student_id == student_id))
-
-        # 3. Delete child records that reference user_id
-        if user_id_to_delete:
-            await db.execute(delete(FeePayment).where(FeePayment.user_id == user_id_to_delete))
-            await db.execute(delete(HomeworkSubmission).where(HomeworkSubmission.student_id == user_id_to_delete))
-            await db.execute(delete(UserPushToken).where(UserPushToken.user_id == user_id_to_delete))
-            await db.execute(delete(ChatMessage).where(ChatMessage.user_id == user_id_to_delete))
-            await db.execute(delete(Notification).where(Notification.user_id == user_id_to_delete))
-            # Nullify Homework/PointTransaction rows that soft-reference this user
-            await db.execute(update(Homework).where(Homework.student_id == user_id_to_delete).values(student_id=None))
-            await db.execute(update(PointTransaction).where(PointTransaction.given_by == user_id_to_delete).values(given_by=None))
-            # parent_id is NOT NULL — delete any other student records that reference this user as parent
-            # (fetch their IDs first so we can cascade-delete their children too)
-            orphan_res = await db.execute(
-                select(Student.id).where(Student.parent_id == user_id_to_delete, Student.id != student_id)
+            await db.execute(
+                update(User).where(User.id == user_id_to_delete).values(is_approved=False)
             )
-            orphan_ids = [row[0] for row in orphan_res.fetchall()]
-            if orphan_ids:
-                await db.execute(delete(ProgressTracking).where(ProgressTracking.student_id.in_(orphan_ids)))
-                await db.execute(delete(PointTransaction).where(PointTransaction.student_id.in_(orphan_ids)))
-                await db.execute(delete(RewardRedemption).where(RewardRedemption.student_id.in_(orphan_ids)))
-                await db.execute(delete(QuizAttempt).where(QuizAttempt.student_id.in_(orphan_ids)))
-                await db.execute(delete(Attendance).where(Attendance.student_id.in_(orphan_ids)))
-                await db.execute(delete(Enrollment).where(Enrollment.student_id.in_(orphan_ids)))
-                await db.execute(delete(LeaveRequest).where(LeaveRequest.student_id.in_(orphan_ids)))
-                await db.execute(delete(PendingEnrollment).where(PendingEnrollment.student_id.in_(orphan_ids)))
-                await db.execute(delete(Student).where(Student.id.in_(orphan_ids)))
-                logger.info(f"[DELETE-STUDENT] Also deleted {len(orphan_ids)} orphaned student(s) sharing same parent.")
-
-        if student_email:
-            await db.execute(delete(PasswordResetOTP).where(PasswordResetOTP.email == student_email))
-            await db.execute(delete(PendingRegistration).where(PendingRegistration.email == student_email))
-
-        # 4. Delete the Student row FIRST (removes parent_id and user_id FK references)
-        await db.execute(delete(Student).where(Student.id == student_id))
-        # Flush to apply the student deletion before we try to delete the user
-        await db.flush()
-
-        # 5. Supabase Auth account removal (non-blocking — failures are logged, not raised)
-        if user_id_to_delete and settings.SUPABASE_SERVICE_KEY:
-            try:
-                admin_client = _cc(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
-                admin_client.auth.admin.delete_user(str(user_id_to_delete))
-                logger.info(f"[DELETE-STUDENT] Deleted user {user_id_to_delete} from Supabase Auth.")
-            except Exception as e:
-                logger.info(f"[DELETE-STUDENT] Supabase delete user info: {e}")
-
-        # 6. Now it is safe to delete the User row (no more Student rows reference it)
-        if user_id_to_delete:
-            await db.execute(delete(User).where(User.id == user_id_to_delete))
-
+            
         await db.commit()
-        return {"message": "Student and their login account deleted successfully"}
+        
+        # 4. Notify admin if teacher deleted the student
+        if role == "teacher":
+            async def notify_admins(session, student_name, teacher_name):
+                try:
+                    from sqlalchemy import cast, String, func
+                    admin_res = await session.execute(
+                        select(User).where(
+                            (User.role == UserRole.admin) |
+                            (cast(User.role, String) == 'admin') |
+                            (func.lower(cast(User.role, String)) == 'admin')
+                        )
+                    )
+                    admins = admin_res.scalars().all()
+                    for admin in admins:
+                        notif = Notification(
+                            id=uuid.uuid4(),
+                            user_id=admin.id,
+                            title="Student Deleted by Teacher",
+                            message=f"Teacher {teacher_name} deactivated student: {student_name}",
+                            is_read=False,
+                        )
+                        session.add(notif)
+                        await NotificationService.send_push_notification(
+                            session, admin.id, "Student Deactivated",
+                            f"Teacher {teacher_name} deactivated student {student_name}",
+                            {"type": "student_deletion"}
+                        )
+                    await session.commit()
+                except Exception as e:
+                    logger.error(f"Failed to notify admins of deletion: {e}")
+
+            student_name = f"{student.first_name} {student.last_name}".strip()
+            teacher_name = current_user.get("full_name") or "Unknown"
+            asyncio.create_task(notify_admins(db, student_name, teacher_name))
+
+        return {"message": "Student has been deactivated successfully."}
 
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"[DELETE-STUDENT] Delete failed for student_id={student_id}: {exc}", exc_info=True)
+        logger.error(f"[DELETE-STUDENT] Soft-Delete failed for student_id={student_id}: {exc}", exc_info=True)
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to delete student: {str(exc)}")
+

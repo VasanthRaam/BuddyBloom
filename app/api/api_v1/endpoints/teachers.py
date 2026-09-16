@@ -6,6 +6,7 @@ from typing import List
 from uuid import UUID
 from app.db.database import get_db
 from app.db.models import User, UserRole, Batch, Course, Enrollment, Student
+from sqlalchemy import text
 
 router = APIRouter()
 
@@ -83,3 +84,46 @@ async def get_teacher_board(teacher_id: UUID, db: AsyncSession = Depends(get_db)
         course_map[b.course_id]["total_students"] += len(student_list)
 
     return list(course_map.values())
+
+from pydantic import BaseModel
+class TeacherBatchesUpdate(BaseModel):
+    batch_ids: List[UUID]
+
+@router.put("/{teacher_id}/batches")
+async def update_teacher_batches(teacher_id: UUID, request: TeacherBatchesUpdate, db: AsyncSession = Depends(get_db)):
+    """Update batches assigned to a teacher."""
+    t_query = select(User).where(User.id == teacher_id, User.role == UserRole.teacher)
+    t_res = await db.execute(t_query)
+    teacher = t_res.scalars().first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    # Unassign current batches
+    update_q = text("UPDATE batches SET teacher_id = NULL WHERE teacher_id = :tid")
+    await db.execute(update_q, {"tid": teacher_id})
+
+    # Assign new batches
+    if request.batch_ids:
+        assign_q = text("UPDATE batches SET teacher_id = :tid WHERE id = ANY(:bids)")
+        await db.execute(assign_q, {"tid": teacher_id, "bids": [str(b) for b in request.batch_ids]})
+        
+    await db.commit()
+    return {"message": "Teacher batches updated"}
+
+@router.delete("/{teacher_id}")
+async def delete_teacher(teacher_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Delete a teacher."""
+    t_query = select(User).where(User.id == teacher_id, User.role == UserRole.teacher)
+    t_res = await db.execute(t_query)
+    teacher = t_res.scalars().first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+        
+    # Unassign from batches
+    update_q = text("UPDATE batches SET teacher_id = NULL WHERE teacher_id = :tid")
+    await db.execute(update_q, {"tid": teacher_id})
+    
+    # Delete teacher
+    await db.delete(teacher)
+    await db.commit()
+    return {"message": "Teacher deleted"}

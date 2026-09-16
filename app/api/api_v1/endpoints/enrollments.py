@@ -27,8 +27,11 @@ async def request_enrollment(
 
     user_uuid = uuid.UUID(current_user["id"])
     
-    # Auto-infer student_id if missing and user is a student
-    if not request.student_id:
+    # Auto-infer student_id or teacher_id
+    if current_user["role"] == "teacher":
+        request.student_id = None
+        teacher_id = user_uuid
+    elif not request.student_id:
         if current_user["role"] == "student":
             st_res = await db.execute(select(Student).where(Student.user_id == user_uuid))
             st = st_res.scalars().first()
@@ -39,14 +42,16 @@ async def request_enrollment(
             raise HTTPException(status_code=400, detail="student_id is required.")
 
     # Verify student exists and belongs to user (or user is admin)
-    student_res = await db.execute(select(Student).where(Student.id == request.student_id))
-    student = student_res.scalars().first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found.")
-        
-    if current_user["role"] not in ["admin"]:
-        if student.user_id != user_uuid and student.parent_id != user_uuid:
-            raise HTTPException(status_code=403, detail="Not authorized to enroll this student.")
+    student = None
+    if request.student_id:
+        student_res = await db.execute(select(Student).where(Student.id == request.student_id))
+        student = student_res.scalars().first()
+        if not student:
+            raise HTTPException(status_code=404, detail="Student not found.")
+            
+        if current_user["role"] not in ["admin"]:
+            if student.user_id != user_uuid and student.parent_id != user_uuid:
+                raise HTTPException(status_code=403, detail="Not authorized to enroll this student.")
 
     # Collect batch IDs (from batch_ids list or single batch_id)
     target_batch_ids = []
@@ -62,33 +67,61 @@ async def request_enrollment(
     requested_course_names = []
 
     for b_id in target_batch_ids:
-        # Check if already enrolled
-        enr_res = await db.execute(
-            select(Enrollment).where(
-                Enrollment.student_id == request.student_id,
-                Enrollment.batch_id == b_id
+        if current_user["role"] == "teacher":
+            # Check if teacher already assigned
+            enr_res = await db.execute(
+                select(Batch).where(
+                    Batch.id == b_id,
+                    Batch.teacher_id == user_uuid
+                )
             )
-        )
-        if enr_res.scalars().first():
-            continue  # Skip if already enrolled
-            
-        # Check if already pending
-        pend_res = await db.execute(
-            select(PendingEnrollment).where(
-                PendingEnrollment.student_id == request.student_id,
-                PendingEnrollment.batch_id == b_id,
-                PendingEnrollment.status == "pending"
+            if enr_res.scalars().first():
+                continue
+                
+            pend_res = await db.execute(
+                select(PendingEnrollment).where(
+                    PendingEnrollment.teacher_id == user_uuid,
+                    PendingEnrollment.batch_id == b_id,
+                    PendingEnrollment.status == "pending"
+                )
             )
-        )
-        if pend_res.scalars().first():
-            continue  # Skip if already pending
+            if pend_res.scalars().first():
+                continue
+                
+            pending_enrollment = PendingEnrollment(
+                id=uuid.uuid4(),
+                teacher_id=user_uuid,
+                batch_id=b_id,
+                status="pending"
+            )
+        else:
+            # Check if student already enrolled
+            enr_res = await db.execute(
+                select(Enrollment).where(
+                    Enrollment.student_id == request.student_id,
+                    Enrollment.batch_id == b_id
+                )
+            )
+            if enr_res.scalars().first():
+                continue  # Skip if already enrolled
+                
+            # Check if already pending
+            pend_res = await db.execute(
+                select(PendingEnrollment).where(
+                    PendingEnrollment.student_id == request.student_id,
+                    PendingEnrollment.batch_id == b_id,
+                    PendingEnrollment.status == "pending"
+                )
+            )
+            if pend_res.scalars().first():
+                continue  # Skip if already pending
 
-        pending_enrollment = PendingEnrollment(
-            id=uuid.uuid4(),
-            student_id=request.student_id,
-            batch_id=b_id,
-            status="pending"
-        )
+            pending_enrollment = PendingEnrollment(
+                id=uuid.uuid4(),
+                student_id=request.student_id,
+                batch_id=b_id,
+                status="pending"
+            )
         db.add(pending_enrollment)
         created_pendings.append(pending_enrollment)
 
@@ -113,29 +146,44 @@ async def request_enrollment(
     )
     admins = admin_res.scalars().all()
     courses_str = ", ".join(set(requested_course_names)) if requested_course_names else "new courses"
-    student_name = f"{student.first_name} {student.last_name}".strip()
+    
+    if current_user["role"] == "teacher":
+        requester_name = current_user.get("full_name", "A Teacher")
+        req_type = "Teacher Course Assignment"
+    else:
+        requester_name = f"{student.first_name} {student.last_name}".strip() if student else "A Student"
+        req_type = "Student Enrollment"
 
     for admin in admins:
         notif = Notification(
             id=uuid.uuid4(),
             user_id=admin.id,
-            title="New Enrollment Request 📝",
-            message=f"{student_name} requested enrollment in: {courses_str}",
+            title=f"New {req_type} Request 📝",
+            message=f"{requester_name} requested enrollment in: {courses_str}",
             link_to="PendingApprovals"
         )
         db.add(notif)
 
-    # Notify Student/Parent in DB
-    student_user_id = student.user_id or student.parent_id
-    if student_user_id:
+    # Notify Requester in DB
+    if current_user["role"] == "teacher":
         st_notif = Notification(
             id=uuid.uuid4(),
-            user_id=student_user_id,
-            title="Enrollment Request Sent ⏳",
-            message=f"Your request to enroll in {courses_str} has been sent to Admin for approval.",
-            link_to="MyCourses"
+            user_id=user_uuid,
+            title="Course Request Sent ⏳",
+            message=f"Your request to join {courses_str} has been sent to Admin for approval.",
         )
         db.add(st_notif)
+    else:
+        student_user_id = student.user_id or student.parent_id if student else None
+        if student_user_id:
+            st_notif = Notification(
+                id=uuid.uuid4(),
+                user_id=student_user_id,
+                title="Enrollment Request Sent ⏳",
+                message=f"Your request to enroll in {courses_str} has been sent to Admin for approval.",
+                link_to="MyCourses"
+            )
+            db.add(st_notif)
         
     await db.commit()
 
@@ -160,6 +208,7 @@ async def request_enrollment(
     return PendingEnrollmentResponse(
         id=first_p.id,
         student_id=first_p.student_id,
+        teacher_id=first_p.teacher_id,
         batch_id=first_p.batch_id,
         status=first_p.status,
         created_at=first_p.created_at
@@ -180,6 +229,7 @@ async def get_pending_enrollments(
         select(PendingEnrollment)
         .options(
             selectinload(PendingEnrollment.student),
+            selectinload(PendingEnrollment.teacher),
             selectinload(PendingEnrollment.batch).selectinload(Batch.course)
         )
         .where(PendingEnrollment.status == "pending")
@@ -192,10 +242,12 @@ async def get_pending_enrollments(
         response.append(PendingEnrollmentResponse(
             id=p.id,
             student_id=p.student_id,
+            teacher_id=p.teacher_id,
             batch_id=p.batch_id,
             status=p.status,
             created_at=p.created_at,
             student_name=f"{p.student.first_name} {p.student.last_name}" if p.student else None,
+            teacher_name=p.teacher.full_name if p.teacher else None,
             batch_name=p.batch.name if p.batch else None,
             course_name=p.batch.course.name if p.batch and p.batch.course else None
         ))
@@ -215,51 +267,72 @@ async def approve_enrollment(
         
     result = await db.execute(
         select(PendingEnrollment)
-        .options(selectinload(PendingEnrollment.student), selectinload(PendingEnrollment.batch).selectinload(Batch.course))
+        .options(
+            selectinload(PendingEnrollment.student),
+            selectinload(PendingEnrollment.teacher),
+            selectinload(PendingEnrollment.batch).selectinload(Batch.course)
+        )
         .where(PendingEnrollment.id == enrollment_id)
     )
     pending = result.scalars().first()
     if not pending or pending.status != "pending":
         raise HTTPException(status_code=404, detail="Pending enrollment not found.")
         
-    # Create the actual enrollment
-    enrollment = Enrollment(
-        id=uuid.uuid4(),
-        student_id=pending.student_id,
-        batch_id=pending.batch_id
-    )
-    db.add(enrollment)
-    
-    pending.status = "approved"
-    
-    # Notify parent/student
-    user_id_to_notify = pending.student.user_id or pending.student.parent_id
-    course_name = pending.batch.course.name if pending.batch and pending.batch.course else "a course"
-    if user_id_to_notify:
-        notif = Notification(
+    if pending.teacher_id:
+        # Assign teacher to batch
+        pending.batch.teacher_id = pending.teacher_id
+        pending.status = "approved"
+        
+        user_id_to_notify = pending.teacher_id
+        course_name = pending.batch.course.name if pending.batch and pending.batch.course else "a course"
+        if user_id_to_notify:
+            notif = Notification(
+                id=uuid.uuid4(),
+                user_id=user_id_to_notify,
+                title="Course Assignment Approved",
+                message=f"Your request to join {course_name} has been approved!",
+            )
+            db.add(notif)
+    else:
+        # Create the actual enrollment for student
+        enrollment = Enrollment(
             id=uuid.uuid4(),
-            user_id=user_id_to_notify,
-            title="Enrollment Approved",
-            message=f"Your request to join {course_name} has been approved!",
-            link_to="MyCourses"
+            student_id=pending.student_id,
+            batch_id=pending.batch_id
         )
-        db.add(notif)
+        db.add(enrollment)
+        
+        pending.status = "approved"
+        
+        # Notify parent/student
+        user_id_to_notify = pending.student.user_id or pending.student.parent_id if pending.student else None
+        course_name = pending.batch.course.name if pending.batch and pending.batch.course else "a course"
+        if user_id_to_notify:
+            notif = Notification(
+                id=uuid.uuid4(),
+                user_id=user_id_to_notify,
+                title="Enrollment Approved",
+                message=f"Your request to join {course_name} has been approved!",
+                link_to="MyCourses"
+            )
+            db.add(notif)
         
     await db.commit()
 
-    # Trigger push notification for student/parent
+    # Trigger push notification
     if user_id_to_notify:
         from app.services.notification_service import NotificationService
         try:
             await NotificationService.send_push_notification(
                 db,
                 user_id_to_notify,
-                "Enrollment Approved 🎉",
+                "Request Approved 🎉",
                 f"Your request to join {course_name} has been approved!",
-                {"type": "enrollment_approved", "screen": "MyCourses"}
+                {"type": "enrollment_approved"}
             )
         except Exception as e:
-            print(f"⚠️ [ENROLLMENT] Failed to send push notification to user {user_id_to_notify}: {e}")
+            print(f"⚠️ [ENROLLMENT] Push notification failed for {user_id_to_notify}: {e}")
+            
     return {"message": "Enrollment approved."}
 
 @router.post("/{enrollment_id}/reject")

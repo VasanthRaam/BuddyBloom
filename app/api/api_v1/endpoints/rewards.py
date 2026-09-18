@@ -264,6 +264,90 @@ async def get_reward_catalog(
     }
 
 
+from pydantic import BaseModel
+class RewardCatalogCreate(BaseModel):
+    title: str
+    description: str
+    points_required: int
+    image_url: Optional[str] = None
+    sort_order: int = 0
+    is_active: bool = True
+
+class RewardCatalogUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    points_required: Optional[int] = None
+    image_url: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+@router.post("/admin/catalog", summary="Create a new reward item")
+async def create_reward_catalog(
+    request: RewardCatalogCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(RequireRole(["admin"]))
+):
+    """Admin only: Create a new reward catalog item."""
+    new_reward = RewardCatalog(
+        id=uuid.uuid4(),
+        title=request.title,
+        description=request.description,
+        points_required=request.points_required,
+        image_url=request.image_url,
+        sort_order=request.sort_order,
+        is_active=request.is_active
+    )
+    db.add(new_reward)
+    await db.commit()
+    await db.refresh(new_reward)
+    return {"message": "Reward created successfully", "id": str(new_reward.id)}
+
+@router.put("/admin/catalog/{reward_id}", summary="Update a reward item")
+async def update_reward_catalog(
+    reward_id: UUID,
+    request: RewardCatalogUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(RequireRole(["admin"]))
+):
+    """Admin only: Update an existing reward catalog item."""
+    res = await db.execute(select(RewardCatalog).where(RewardCatalog.id == reward_id))
+    reward = res.scalars().first()
+    if not reward:
+        raise HTTPException(status_code=404, detail="Reward not found")
+        
+    if request.title is not None:
+        reward.title = request.title
+    if request.description is not None:
+        reward.description = request.description
+    if request.points_required is not None:
+        reward.points_required = request.points_required
+    if request.image_url is not None:
+        reward.image_url = request.image_url
+    if request.sort_order is not None:
+        reward.sort_order = request.sort_order
+    if request.is_active is not None:
+        reward.is_active = request.is_active
+
+    await db.commit()
+    return {"message": "Reward updated successfully"}
+
+@router.delete("/admin/catalog/{reward_id}", summary="Delete a reward item")
+async def delete_reward_catalog(
+    reward_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(RequireRole(["admin"]))
+):
+    """Admin only: Delete a reward catalog item."""
+    res = await db.execute(select(RewardCatalog).where(RewardCatalog.id == reward_id))
+    reward = res.scalars().first()
+    if not reward:
+        raise HTTPException(status_code=404, detail="Reward not found")
+        
+    await db.delete(reward)
+    await db.commit()
+    return {"message": "Reward deleted successfully"}
+
+
 @router.post("/redeem/{reward_id}", summary="Student redeems a reward with their XP points")
 async def redeem_reward(
     reward_id: str,

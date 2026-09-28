@@ -129,20 +129,20 @@ class TeacherBatchesUpdate(BaseModel):
 @router.put("/{teacher_id}/batches")
 async def update_teacher_batches(teacher_id: UUID, request: TeacherBatchesUpdate, db: AsyncSession = Depends(get_db)):
     """Update batches assigned to a teacher."""
-    t_query = select(User).where(User.id == teacher_id, User.role == UserRole.teacher)
+    from sqlalchemy import update
+    t_query = select(User).where(User.id == teacher_id, User.role.in_([UserRole.teacher, "teacher"]))
     t_res = await db.execute(t_query)
     teacher = t_res.scalars().first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
     # Unassign current batches
-    update_q = text("UPDATE batches SET teacher_id = NULL WHERE teacher_id = :tid")
-    await db.execute(update_q, {"tid": teacher_id})
+    await db.execute(update(Batch).where(Batch.teacher_id == teacher_id).values(teacher_id=None))
 
     # Assign new batches
     if request.batch_ids:
-        assign_q = text("UPDATE batches SET teacher_id = :tid WHERE id = ANY(:bids)")
-        await db.execute(assign_q, {"tid": teacher_id, "bids": [str(b) for b in request.batch_ids]})
+        b_uuids = [UUID(str(b)) for b in request.batch_ids]
+        await db.execute(update(Batch).where(Batch.id.in_(b_uuids)).values(teacher_id=teacher_id))
         
     await db.commit()
     return {"message": "Teacher batches updated"}

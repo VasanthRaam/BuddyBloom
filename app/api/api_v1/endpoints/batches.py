@@ -16,21 +16,26 @@ async def get_batches(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    role = current_user.get("role")
+    role_str = str(current_user.get("role") or "").lower()
     user_id = current_user.get("id")
+    import uuid
+    try:
+        user_uuid = uuid.UUID(str(user_id))
+    except (ValueError, TypeError):
+        user_uuid = user_id
     
     query = select(Batch)
     if course_id:
         query = query.where(Batch.course_id == course_id)
         
-    if role == "teacher":
-        query = query.where(Batch.teacher_id == user_id)
-    elif role == "student":
+    if "teacher" in role_str:
+        query = query.where(Batch.teacher_id == user_uuid)
+    elif "student" in role_str:
         from app.db.models import Enrollment, Student
-        query = query.join(Enrollment).join(Student).where(Student.user_id == user_id)
-    elif role == "parent":
+        query = query.join(Enrollment).join(Student).where(Student.user_id == user_uuid)
+    elif "parent" in role_str:
         from app.db.models import Enrollment, Student
-        query = query.join(Enrollment).join(Student).where(Student.parent_id == user_id)
+        query = query.join(Enrollment).join(Student).where(Student.parent_id == user_uuid)
 
     result = await db.execute(query)
     batches = result.scalars().all()

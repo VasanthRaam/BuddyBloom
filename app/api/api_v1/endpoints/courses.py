@@ -13,22 +13,29 @@ async def get_courses(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    role = current_user.get("role")
-    user_id = current_user.get("id")
-    
-    if role == UserRole.admin:
+    role_str = str(current_user.get("role") or "").lower()
+    import uuid
+    try:
+        user_uuid = uuid.UUID(str(user_id))
+    except (ValueError, TypeError):
+        user_uuid = user_id
+
+    if "admin" in role_str:
         query = select(Course)
-    elif role == UserRole.teacher:
+    elif "teacher" in role_str:
         # Get courses linked to batches assigned to this teacher
-        query = select(Course).distinct().join(Batch).where(Batch.teacher_id == user_id)
+        query = select(Course).distinct().join(Batch).where(Batch.teacher_id == user_uuid)
     else:
         # Students/Parents see courses they are enrolled in
         from app.db.models import Enrollment, Student
-        query = select(Course).distinct().join(Batch).join(Enrollment).join(Student).where(Student.user_id == user_id if role == "student" else Student.parent_id == user_id)
-        
+        if "student" in role_str:
+            query = select(Course).distinct().join(Batch).join(Enrollment).join(Student).where(Student.user_id == user_uuid)
+        else:
+            query = select(Course).distinct().join(Batch).join(Enrollment).join(Student).where(Student.parent_id == user_uuid)
+
     result = await db.execute(query)
     courses = result.scalars().all()
-    
+
     return [
         {
             "id": str(c.id),

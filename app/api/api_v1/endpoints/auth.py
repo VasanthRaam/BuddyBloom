@@ -73,20 +73,19 @@ def _role_value(role) -> str:
 @router.get("/courses-batches")
 async def get_courses_batches(db: AsyncSession = Depends(get_db)):
     """Fetch all available courses and their batches for registration."""
-    from app.db.models import Course, Batch
-    res = await db.execute(select(Course))
+    from app.db.models import Course
+    from sqlalchemy.orm import selectinload
+    res = await db.execute(select(Course).options(selectinload(Course.batches)))
     courses = res.scalars().all()
     
-    output = []
-    for c in courses:
-        b_res = await db.execute(select(Batch).where(Batch.course_id == c.id))
-        batches = b_res.scalars().all()
-        output.append({
+    return [
+        {
             "id": str(c.id),
             "name": c.name,
-            "batches": [{"id": str(b.id), "name": b.name} for b in batches]
-        })
-    return output
+            "batches": [{"id": str(b.id), "name": b.name} for b in c.batches]
+        }
+        for c in courses
+    ]
 
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 

@@ -35,26 +35,15 @@ async def get_dashboard_stats(
     # ── 1. ADMIN STATS ────────────────────────────────────────────────────────
     if is_admin:
         try:
+            import asyncio
             from app.db.models import Income
 
-            # Revenue: paid fee payments (case-insensitive)
-            rev_fees_res = await db.execute(
-                select(func.sum(FeePayment.amount)).where(
-                    or_(
-                        FeePayment.status.ilike("paid"),
-                    )
-                )
+            # Execute all queries concurrently
+            rev_fees_task = db.execute(
+                select(func.sum(FeePayment.amount)).where(FeePayment.status.ilike("paid"))
             )
-            rev_fees = rev_fees_res.scalar() or 0.0
-
-            # Revenue: manual incomes
-            rev_inc_res = await db.execute(select(func.sum(Income.amount)))
-            rev_incomes = rev_inc_res.scalar() or 0.0
-
-            total_rev = float(rev_fees) + float(rev_incomes)
-
-            # Pending/unpaid fees (case-insensitive)
-            pend_res = await db.execute(
+            rev_inc_task = db.execute(select(func.sum(Income.amount)))
+            pend_task = db.execute(
                 select(func.sum(FeePayment.amount)).where(
                     or_(
                         FeePayment.status.ilike("pending"),
@@ -64,16 +53,20 @@ async def get_dashboard_stats(
                     )
                 )
             )
-            pending = pend_res.scalar() or 0.0
-
-            # Count Students from Student profile table
-            st_count_res = await db.execute(select(func.count(Student.id)))
-            total_studs = st_count_res.scalar() or 0
-
-            # Count Teachers
-            teach_count_res = await db.execute(
-                select(func.count(User.id)).where(User.role == UserRole.teacher)
+            st_count_task = db.execute(select(func.count(Student.id)))
+            teach_count_task = db.execute(
+                select(func.count(User.id)).where(User.role.in_([UserRole.teacher, "teacher"]))
             )
+
+            rev_fees_res, rev_inc_res, pend_res, st_count_res, teach_count_res = await asyncio.gather(
+                rev_fees_task, rev_inc_task, pend_task, st_count_task, teach_count_task
+            )
+
+            rev_fees = rev_fees_res.scalar() or 0.0
+            rev_incomes = rev_inc_res.scalar() or 0.0
+            total_rev = float(rev_fees) + float(rev_incomes)
+            pending = pend_res.scalar() or 0.0
+            total_studs = st_count_res.scalar() or 0
             total_teachers = teach_count_res.scalar() or 0
 
             response.admin = AdminStats(

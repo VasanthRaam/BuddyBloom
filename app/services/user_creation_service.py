@@ -85,7 +85,8 @@ class UserCreationService:
         await db.flush()
 
         # 4. Role-specific profile
-        if role == UserRole.student:
+        role_str = str(role.value if hasattr(role, 'value') else role).lower()
+        if "student" in role_str:
             student_profile = Student(
                 id=uuid.uuid4(),
                 user_id=new_user.id,
@@ -102,20 +103,28 @@ class UserCreationService:
 
             if selected_batch_ids:
                 for b_id in selected_batch_ids:
-                    enrollment = Enrollment(
-                        id=uuid.uuid4(),
-                        student_id=student_profile.id,
-                        batch_id=uuid.UUID(str(b_id))
-                    )
-                    db.add(enrollment)
+                    try:
+                        b_uuid = uuid.UUID(str(b_id))
+                        enrollment = Enrollment(
+                            id=uuid.uuid4(),
+                            student_id=student_profile.id,
+                            batch_id=b_uuid
+                        )
+                        db.add(enrollment)
+                    except ValueError:
+                        pass
         
-        elif role == UserRole.teacher:
+        elif "teacher" in role_str:
             if selected_batch_ids:
                 for b_id in selected_batch_ids:
-                    res = await db.execute(select(Batch).where(Batch.id == uuid.UUID(str(b_id))))
-                    batch = res.scalars().first()
-                    if batch:
-                        batch.teacher_id = new_user.id
+                    try:
+                        b_uuid = uuid.UUID(str(b_id))
+                        res = await db.execute(select(Batch).where(Batch.id == b_uuid))
+                        batch = res.scalars().first()
+                        if batch:
+                            batch.teacher_id = new_user.id
+                    except ValueError:
+                        pass
 
         await db.commit()
         await db.refresh(new_user)

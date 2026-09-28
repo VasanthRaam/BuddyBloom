@@ -4,6 +4,7 @@ from sqlalchemy import select, func, case, cast, Float
 from typing import List
 from uuid import UUID
 import asyncio
+from pydantic import BaseModel
 from app.db.database import get_db
 from app.schemas.student import StudentResponse, StudentCreate, StudentUpdate
 from app.services.student_service import StudentService
